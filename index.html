@@ -26,6 +26,21 @@
         <!-- Main Menu -->
         <div id="main-menu" class="screen active">
             <h1 class="game-title">CHANNEL<br><span class="highlight">SURVIVOR</span></h1>
+
+            <div class="mode-selector" style="margin-bottom: 20px; text-align: center;">
+                <h3 style="margin-bottom: 5px; color: #aaa; font-size: 0.9rem;">GAME MODE</h3>
+                <div style="display: flex; gap: 10px; justify-content: center; align-items: center;">
+                    <button id="btn-mode-prev" class="secondary-btn" style="width: 40px;">&lt;</button>
+                    <div style="text-align: center; width: 150px;">
+                        <span id="mode-display"
+                            style="font-size: 1.2rem; font-weight: bold; color: var(--accent); display: block;">1
+                            LANE</span>
+                        <span id="mode-desc" style="font-size: 0.7rem; color: #888; display: block;">Classic</span>
+                    </div>
+                    <button id="btn-mode-next" class="secondary-btn" style="width: 40px;">&gt;</button>
+                </div>
+            </div>
+
             <div class="menu-buttons">
                 <button id="btn-play" class="primary-btn">PLAY</button>
                 <button id="btn-upgrades" class="secondary-btn">UPGRADES</button>
@@ -48,6 +63,31 @@
             </div>
         </div>
 
+        <!-- Settings Menu -->
+        <div id="settings-menu" class="screen hidden">
+            <h2>SETTINGS</h2>
+            <div class="settings-container">
+
+                <div class="setting-row">
+                    <label for="vol-sfx">SFX VOLUME</label>
+                    <input type="range" id="vol-sfx" min="0" max="100" value="50">
+                    <span id="vol-sfx-val">50%</span>
+                </div>
+
+                <div class="setting-row">
+                    <label for="vol-music">MUSIC VOLUME</label>
+                    <input type="range" id="vol-music" min="0" max="100" value="0">
+                    <span id="vol-music-val">0%</span>
+                </div>
+
+                <p class="setting-desc">Music functionality coming soon!</p>
+            </div>
+
+            <div class="menu-footer">
+                <button id="btn-back-settings" class="secondary-btn">BACK</button>
+            </div>
+        </div>
+
         <!-- HUD -->
         <div id="hud" class="screen hidden overlay">
             <div class="top-bar">
@@ -56,6 +96,7 @@
                     <span class="bar-text">HP</span>
                 </div>
                 <div class="score-container">
+                    <div id="lives-count" style="color: #ff0055; font-weight: bold; margin-right: 15px;">♥ 10</div>
                     <div id="timer">00:00</div>
                     <div id="kill-count">💀 0</div>
                 </div>
@@ -92,6 +133,7 @@
             <h2>PAUSED</h2>
             <div class="menu-buttons">
                 <button id="btn-resume" class="primary-btn">RESUME</button>
+                <button id="btn-settings-pause" class="secondary-btn">SETTINGS</button>
 
                 <div class="difficulty-control" style="margin: 1rem 0; text-align: center;">
                     <h3>DIFFICULTY</h3>

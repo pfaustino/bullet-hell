@@ -18,17 +18,31 @@ const CONFIG = {
         enemyTank: '#ff8800',
         xp: '#05ffa1',
         text: '#ffffff',
-        upgrade: '#00ff00' // New color for upgrades
+        upgrade: '#00ff00',
+        laneBorder: '#ffffff20'
+    },
+    // Lane configuration (relative to centerX)
+    lanes: {
+        mainHalf: 200,      // Main lane: -200 to +200 (enemies spawn here)
+        edgeInner: 200,     // Edge lane inner boundary  
+        edgeOuter: 320      // Edge lane outer boundary (power-ups fall here)
     }
 };
 
+const GAME_MODES = [
+    { id: 0, name: "1 LANE", desc: "Classic: Loot from Kills", lanes: ['main'] },
+    { id: 1, name: "2 LANE", desc: "Left Lane: Upgrades", lanes: ['left', 'main'] },
+    { id: 2, name: "3 LANE", desc: "Right Lane: Allies", lanes: ['left', 'main', 'right'] }
+];
+let gameMode = 0; // Index into GAME_MODES
+
 const UPGRADE_POOL = [
-    { id: 'dmg', name: 'DAMAGE UP', color: '#ff0055', weight: 1, apply: (p) => { p.stats.damageMult += 0.2; } },
-    { id: 'spd', name: 'FIRE RATE UP', color: '#ffff00', weight: 1, apply: (p) => { p.stats.fireRateMult += 0.15; } },
-    { id: 'mov', name: 'SPEED UP', color: '#00ccff', weight: 1, apply: (p) => { p.stats.speedMult += 0.1; } },
-    { id: 'hp', name: 'HEAL', color: '#00ff66', weight: 0.8, apply: (p) => { p.maxHp += 10; p.heal(25); } },
-    { id: 'cnt', name: 'MULTISHOT', color: '#ffffff', weight: 0.1, apply: (p) => { p.weapons[0].count++; } },
-    { id: 'prc', name: 'PIERCE UP', color: '#ffaa00', weight: 0.5, apply: (p) => { p.weapons[0].pierce++; } }
+    { id: 'dmg', name: 'DAMAGE UP', icon: '⚔️', color: '#ff0055', weight: 1, apply: (p) => { p.stats.damageMult += 0.2; } },
+    { id: 'spd', name: 'FIRE RATE UP', icon: '🔥', color: '#ffff00', weight: 1, apply: (p) => { p.stats.fireRateMult += 0.15; } },
+    { id: 'mov', name: 'SPEED UP', icon: '⏩', color: '#00ccff', weight: 1, apply: (p) => { p.stats.speedMult += 0.1; game.speedUpsWave++; } },
+    { id: 'hp', name: 'HEART', icon: '❤️', color: '#ff0066', weight: 0.8, apply: (p) => { p.maxHp += 10; p.heal(100); game.gainLife(); } },
+    { id: 'cnt', name: 'MULTISHOT', icon: '✨', color: '#ffffff', weight: 0.1, apply: (p) => { if (p.weapons[0].count < 30) p.weapons[0].count++; } },
+    { id: 'prc', name: 'PIERCE UP', icon: '🏹', color: '#ffaa00', weight: 0.5, apply: (p) => { if (p.weapons[0].pierce < 5) p.weapons[0].pierce++; } }
 ];
 
 // --- STATE MANAGEMENT ---
@@ -37,17 +51,20 @@ const STATE = {
     PLAYING: 1,
     PAUSED: 2,
     GAME_OVER: 3,
-    SHOP: 4
+    SHOP: 4,
+    SETTINGS: 5
 };
 // Removed LEVEL_UP state
 
 let currentState = STATE.MENU;
+let previousState = STATE.MENU; // For Settings navigation
 let lastTime = 0;
 let deltaTime = 0;
 let score = 0;
 let gameTime = 0;
 let killCount = 0;
 let coinsRun = 0;
+let lives = 10;
 let notifications = []; // Global notification queue
 
 // Canvas Setup
@@ -160,11 +177,24 @@ class Player {
     update(dt) {
         // Movement is handled by input directly influencing x/y for instant feel
         // But we apply boundary checks here
+        // Calculate movement bounds based on Game Mode
+        const mode = GAME_MODES[gameMode];
+        let minX = -CONFIG.laneWidth / 2;
+        let maxX = CONFIG.laneWidth / 2;
+
+        if (mode.lanes.includes('left')) minX -= 150; // Side lane width
+        if (mode.lanes.includes('right')) maxX += 150;
+
         const laneHalf = (Math.min(canvas.width, CONFIG.laneWidth) / 2) - (this.width / 2);
 
-        // Clamp X
-        if (this.x < -laneHalf) this.x = -laneHalf;
-        if (this.x > laneHalf) this.x = laneHalf;
+        // Actually, let's use the explicit bounds relative to CenterX(0)
+        // Main Lane is always [-300, 300]
+        // Left Lane is [-450, -300]
+        // Right Lane is [300, 450]
+
+        // Override basic lane clamp
+        if (this.x < minX + (this.width / 2)) this.x = minX + (this.width / 2);
+        if (this.x > maxX - (this.width / 2)) this.x = maxX - (this.width / 2);
 
         // Update Weapons
         this.weapons.forEach(w => w.update(dt, this));
@@ -172,6 +202,7 @@ class Player {
 
     shootBasic(weapon) {
         // Fire logic
+        AudioFX.shoot(); // Sound
         const offsetStep = 10;
         const totalWidth = (weapon.count - 1) * offsetStep;
         let startX = this.x - (totalWidth / 2);
@@ -211,7 +242,16 @@ class Player {
         // Visual shake?
         game.shake = 5;
         if (this.hp <= 0) {
-            game.gameOver();
+            game.loseLife();
+            // Reset HP if still alive
+            if (lives > 0) {
+                this.hp = this.maxHp;
+                game.addNotification("HEART LOST!", "#ff0000", "big");
+                // Clear nearby enemies to prevent instant death loop?
+                game.enemies.forEach(e => {
+                    if (Math.abs(e.y - this.y) < 300) e.die();
+                });
+            }
         }
     }
 
@@ -281,9 +321,9 @@ class Enemy {
     constructor(type) {
         this.type = type;
         this.radius = 15;
-        // Random horizontal position within lane
-        const laneHalf = (Math.min(canvas.width, CONFIG.laneWidth) / 2) - 20;
-        this.x = (Math.random() * laneHalf * 2) - laneHalf;
+        // Random horizontal position within MAIN lane only (not edge lanes)
+        const mainLaneHalf = CONFIG.lanes.mainHalf - 20; // Leave margin from edges
+        this.x = (Math.random() * mainLaneHalf * 2) - mainLaneHalf;
         this.y = -50;
 
         this.markedForDeletion = false;
@@ -293,23 +333,28 @@ class Enemy {
         const diff = DIFFICULTY_LEVELS[difficultyIndex];
         const hpMult = diff.hpMult;
 
+        // Reverted Speed Scaling
+
         if (type === 'fast') {
-            this.hp = (10 + (gameTime * 0.1)) * hpMult;
+            this.hp = (10 + (gameTime * 1.0)) * hpMult;
             this.speed = 150;
             this.color = CONFIG.colors.enemyFast;
             this.radius = 12;
             this.xpValue = 15;
+            this.icon = '⚡';
         } else if (type === 'tank') {
-            this.hp = (60 + (gameTime * 0.5)) * hpMult;
+            this.hp = (100 + (gameTime * 5.0)) * hpMult;
             this.speed = 40;
             this.color = CONFIG.colors.enemyTank;
             this.radius = 25;
             this.xpValue = 50;
+            this.icon = '👹';
         } else { // Basic
-            this.hp = (20 + (gameTime * 0.2)) * hpMult;
+            this.hp = (20 + (gameTime * 2.0)) * hpMult;
             this.speed = 80;
             this.color = CONFIG.colors.enemyBasic;
             this.xpValue = 10;
+            this.icon = '👾';
         }
     }
 
@@ -319,6 +364,9 @@ class Enemy {
         // Remove if off screen bottom
         if (this.y > canvas.height + 50) {
             this.markedForDeletion = true;
+            // Life Lost Mechanic
+            game.loseLife();
+            game.addNotification("BREACH!", "#ff0000");
         }
     }
 
@@ -336,41 +384,51 @@ class Enemy {
         this.markedForDeletion = true;
         killCount++;
 
+        AudioFX.explode(); // Sound
+        game.spawnExplosion(this.x, this.y, this.color, 20, 300); // Massive visual
+
         // Drop Chance Logic - INCREASED DROP RATE
         const roll = Math.random();
 
-        if (roll < 0.40) { // 40% Chance for Upgrade Drop (Huge buff)
-            // Select Weighted Upgrade
-            // Simple random for now
-            const idx = Math.floor(Math.random() * UPGRADE_POOL.length);
-            const upgrade = UPGRADE_POOL[idx];
-            game.pickups.push(new Pickup(this.x, this.y, 1, 'upgrade', upgrade));
-        } else if (roll < 0.60) {
-            // 20% Chance for Coin (40-60 range)
-            game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
-        }
+        if (gameMode === 0) {
+            if (roll < 0.40) { // 40% Chance for Upgrade Drop (Mode 1)
+                // Filter out Speed if already taken this wave
+                const available = UPGRADE_POOL.filter(u => u.id !== 'mov' || game.speedUpsWave < 1);
 
-        // Spawn particles
-        for (let i = 0; i < 5; i++) {
-            game.particles.push(new Particle(this.x, this.y, this.color));
+                if (available.length > 0) {
+                    const idx = Math.floor(Math.random() * available.length);
+                    const upgrade = available[idx];
+                    game.pickups.push(new Pickup(this.x, this.y, 1, 'upgrade', upgrade));
+                }
+            } else if (roll < 0.60) {
+                game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
+            }
+        } else {
+            // Modes 2 & 3: Only coins drop from enemies
+            if (roll < 0.20) {
+                game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
+            }
         }
     }
 
     draw(ctx) {
         const screenX = centerX + this.x;
-        ctx.fillStyle = this.color;
-        // Simple shape based on type
-        ctx.beginPath();
-        if (this.type === 'tank') {
-            ctx.fillRect(screenX - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
-        } else if (this.type === 'fast') {
-            ctx.moveTo(screenX, this.y + this.radius);
-            ctx.lineTo(screenX - this.radius, this.y - this.radius);
-            ctx.lineTo(screenX + this.radius, this.y - this.radius);
-        } else {
-            ctx.arc(screenX, this.y, this.radius, 0, Math.PI * 2);
-        }
-        ctx.fill();
+
+        ctx.font = `${this.radius * 2}px Arial`; // Scale emoji
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Shadow/Glow
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+
+        // Wobble animation
+        // const wobble = Math.sin(gameTime * 10 + this.x) * 5;
+        // ctx.fillText(this.icon, screenX + wobble, this.y);
+
+        ctx.fillText(this.icon, screenX, this.y);
+
+        ctx.shadowBlur = 0;
     }
 }
 
@@ -414,54 +472,44 @@ class Pickup {
                     // Apply Upgrade Immediately
                     this.data.apply(player);
                     // Notify
-                    game.addNotification(this.data.name, this.data.color);
+                    Game.addNotification(this.data.name, this.data.color);
+                    AudioFX.powerup(); // Sound
                 } else {
                     const mult = 1 + (saveData.upgrades.coinGain * 0.2);
                     const val = Math.ceil(this.amount * mult);
                     coinsRun += val;
                     UI.updateHUD();
+                    AudioFX.playTone(800, 'sine', 0.05, 0.05); // Coin sound
                 }
                 this.markedForDeletion = true;
-
-                // CRITICAL FIX: Immediately remove from array
-                const idx = game.pickups.indexOf(this);
-                if (idx > -1) {
-                    game.pickups.splice(idx, 1);
-                }
             }
         }
 
-        this.y += 40 * dt; // Fall down the lane
+        this.y += 150 * dt; // Fall down the lane FASTER
     }
 
     draw(ctx) {
         const screenX = centerX + this.x;
 
         if (this.type === 'upgrade') {
-            // Draw Floating Gem / Diamond
-            const size = 15;
+            // Draw Floating Emoji
+            const size = 30;
             // Pulse size
-            const pulse = 1 + (Math.sin(gameTime * 5) * 0.1);
+            const pulse = 1 + (Math.sin(gameTime * 5) * 0.2);
 
             ctx.translate(screenX, this.y);
             ctx.scale(pulse, pulse);
-            // Spin effect?
-            // ctx.rotate(gameTime); 
 
-            ctx.shadowBlur = 15;
+            ctx.shadowBlur = 20;
             ctx.shadowColor = this.color;
-            ctx.fillStyle = this.color;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
 
-            ctx.beginPath();
-            ctx.moveTo(0, -size); // Top
-            ctx.lineTo(size, 0);  // Right
-            ctx.lineTo(0, size);  // Bottom
-            ctx.lineTo(-size, 0); // Left
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+            ctx.font = `${size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Icon
+            const icon = this.data.icon || '💎';
+            ctx.fillText(icon, 0, 0);
 
             ctx.shadowBlur = 0;
             ctx.scale(1 / pulse, 1 / pulse);
@@ -469,46 +517,112 @@ class Pickup {
 
         } else {
             // Coin
-            ctx.beginPath();
-            ctx.arc(screenX, this.y, this.radius, 0, Math.PI * 2);
-            ctx.fillStyle = this.color;
-            ctx.fill();
-            // $ symbol
-            ctx.fillStyle = '#000';
-            ctx.font = '10px Arial';
+            const size = 20;
+            ctx.font = `${size}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('$', screenX, this.y);
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = '#ffee00';
+            ctx.fillText('🪙', screenX, this.y);
+            ctx.shadowBlur = 0;
         }
     }
 }
 
 class Particle {
-    constructor(x, y, color) {
+    constructor(x, y, color, speedFn, sizeFn) {
         this.x = x;
         this.y = y;
         this.color = color;
         this.angle = Math.random() * Math.PI * 2;
-        this.speed = Math.random() * 100 + 50;
-        this.life = 0.5; // seconds
-        this.size = Math.random() * 3 + 1;
+        this.speed = speedFn ? speedFn() : (Math.random() * 100 + 50);
+        this.life = 1.0; // Scaled life
+        this.decay = Math.random() * 0.03 + 0.02;
+        this.size = sizeFn ? sizeFn() : (Math.random() * 3 + 1);
+        this.vx = Math.cos(this.angle) * this.speed;
+        this.vy = Math.sin(this.angle) * this.speed;
     }
 
     update(dt) {
-        this.life -= dt;
-        this.x += Math.cos(this.angle) * this.speed * dt;
-        this.y += Math.sin(this.angle) * this.speed * dt;
+        this.life -= this.decay * (dt * 60);
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vx *= 0.95; // Friction
+        this.vy *= 0.95;
     }
 
     draw(ctx) {
         if (this.life <= 0) return;
         const screenX = centerX + this.x;
-        ctx.globalAlpha = this.life * 2;
+        ctx.globalAlpha = Math.max(0, this.life);
         ctx.fillStyle = this.color;
         ctx.fillRect(screenX, this.y, this.size, this.size);
         ctx.globalAlpha = 1;
     }
 }
+
+const AudioFX = {
+    ctx: null,
+    sfxVolume: 0.5, // Default 50%
+    musicVolume: 0.3, // Default 30%
+    musicTrack: null,
+
+    init() {
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Setup Music
+            this.musicTrack = new Audio('audio/arms-ready-443024.mp3');
+            this.musicTrack.loop = true;
+            this.updateMusicVolume();
+        }
+    },
+
+    startMusic() {
+        if (this.musicTrack) {
+            this.musicTrack.play().catch(e => console.log("Music play blocked until interaction"));
+        }
+    },
+
+    updateMusicVolume() {
+        if (this.musicTrack) {
+            this.musicTrack.volume = this.musicVolume;
+        }
+    },
+
+    playTone(freq, type, duration, vol = 0.1) {
+        if (!this.ctx) this.init();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+
+        // Apply global volume
+        const finalVol = vol * this.sfxVolume;
+
+        gain.gain.setValueAtTime(finalVol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    },
+    shoot() { this.playTone(400, 'square', 0.1, 0.05); },
+    hit() { this.playTone(150, 'sawtooth', 0.1, 0.05); },
+    explode() {
+        // Noise sim (random freq ramps)
+        this.playTone(100, 'sawtooth', 0.2, 0.1);
+        setTimeout(() => this.playTone(50, 'square', 0.2, 0.1), 50);
+    },
+    damage() {
+        this.playTone(150, 'sawtooth', 0.5, 0.2);
+        this.playTone(100, 'sawtooth', 0.5, 0.2);
+    },
+    powerup() {
+        this.playTone(600, 'sine', 0.1, 0.1);
+        setTimeout(() => this.playTone(900, 'sine', 0.2, 0.1), 100);
+    }
+};
 
 // --- SYSTEMS ---
 
@@ -581,7 +695,8 @@ const UI = {
         pause: document.getElementById('pause-menu'),
         // levelUp removed
         gameOver: document.getElementById('game-over-screen'),
-        upgrades: document.getElementById('upgrades-menu')
+        upgrades: document.getElementById('upgrades-menu'),
+        settings: document.getElementById('settings-menu')
     },
 
     elements: {
@@ -591,6 +706,7 @@ const UI = {
         timer: document.getElementById('timer'),
         coins: document.getElementById('game-coins'),
         kills: document.getElementById('kill-count'),
+        lives: document.getElementById('lives-count'),
         menuCoins: document.getElementById('menu-coins'),
         shopCoins: document.getElementById('shop-coins'),
         goTime: document.getElementById('go-time'),
@@ -606,15 +722,19 @@ const UI = {
         const hpPct = (p.hp / p.maxHp) * 100;
         this.elements.hpBar.style.width = `${hpPct}%`;
 
-        const statText = `DMG: ${(15 * p.stats.damageMult).toFixed(1)}
-SPD: ${(150 * p.stats.speedMult).toFixed(0)}
-FR: x${p.stats.fireRateMult.toFixed(2)}
-SHT: ${p.weapons[0].count}
-PRC: ${p.weapons[0].pierce}`;
+        const statText = `LEVEL: ${game.wave}
+❤️ ${lives}
+____________
+⚔️ ${(15 * p.stats.damageMult).toFixed(1)}
+⏩ ${(150 * p.stats.speedMult).toFixed(0)}
+🔥 x${p.stats.fireRateMult.toFixed(2)}
+✨ ${p.weapons[0].count}
+🏹 ${p.weapons[0].pierce}`;
 
         // Update stats box using cached element
         if (this.elements.statBox) {
             this.elements.statBox.textContent = statText;
+            this.elements.statBox.style.whiteSpace = 'pre-line'; // Ensure line breaks
         } else {
             // Retry fetch if missed (racing condition safe)
             this.elements.statBox = document.getElementById('stat-debug-box');
@@ -628,6 +748,9 @@ PRC: ${p.weapons[0].pierce}`;
         this.elements.coins.textContent = coinsRun;
         this.elements.kills.textContent = `💀 ${killCount}`;
 
+        // Hide old lives counter
+        if (this.elements.lives) this.elements.lives.style.display = 'none';
+
         // Timer format
         const totalSec = Math.floor(gameTime);
         const m = Math.floor(totalSec / 60).toString().padStart(2, '0');
@@ -639,13 +762,25 @@ PRC: ${p.weapons[0].pierce}`;
     },
 
     showScreen(name) {
-        Object.values(this.screens).forEach(s => {
+        // Hide all screens except HUD (which is an overlay during gameplay)
+        Object.entries(this.screens).forEach(([key, s]) => {
+            if (key === 'hud') return; // Don't touch HUD here
             s.classList.remove('active');
             s.classList.add('hidden');
         });
+
         if (name && this.screens[name]) {
             this.screens[name].classList.remove('hidden');
             this.screens[name].classList.add('active');
+        }
+
+        // Show HUD during gameplay states
+        if (currentState === STATE.PLAYING || currentState === STATE.PAUSED || currentState === STATE.SETTINGS) {
+            // Only show HUD if we're in a game session (not returning to main menu)
+            if (name !== 'menu' && name !== 'upgrades' && name !== 'gameOver') {
+                this.screens.hud.classList.remove('hidden');
+                this.screens.hud.classList.add('active');
+            }
         }
     },
 
@@ -707,9 +842,9 @@ const DIFFICULTY_LEVELS = [
     { name: "LEVEL 1", desc: "Easiest", hpMult: 1.0, spawnMult: 1.0 },
     { name: "LEVEL 2", desc: "Easy", hpMult: 1.2, spawnMult: 1.5 },
     { name: "LEVEL 3", desc: "Normal", hpMult: 1.5, spawnMult: 2.2 },
-    { name: "LEVEL 4", desc: "Hard", hpMult: 2.0, spawnMult: 3.5 },
-    { name: "LEVEL 5", desc: "Expert", hpMult: 3.0, spawnMult: 5.0 },
-    { name: "LEVEL 6", desc: "INSANE", hpMult: 5.0, spawnMult: 8.0 }
+    { name: "LEVEL 4", desc: "Hard", hpMult: 2.5, spawnMult: 4.0 },
+    { name: "LEVEL 5", desc: "Expert", hpMult: 4.0, spawnMult: 6.0 },
+    { name: "LEVEL 6", desc: "INSANE", hpMult: 8.0, spawnMult: 12.0 }
 ];
 
 let difficultyIndex = 0; // Default 0 (Level 1)
@@ -721,11 +856,21 @@ const Game = {
     pickups: [],
     particles: [],
     enemySpawnTimer: 0,
+    sideLaneTimer: 0, // For upgrades/allies
+    heartSpawnTimer: 0, // New: Hearts every 20s
     shake: 0,
 
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
+
+        // Init Audio on first interaction
+        const startAudio = () => {
+            AudioFX.init();
+            AudioFX.startMusic();
+        };
+        window.addEventListener('click', startAudio, { once: true });
+        window.addEventListener('keydown', startAudio, { once: true });
 
         this.player = new Player();
         Input.init();
@@ -737,16 +882,67 @@ const Game = {
             UI.showScreen('upgrades');
             currentState = STATE.SHOP;
         };
+        document.getElementById('btn-settings').onclick = () => {
+            previousState = currentState;
+            UI.showScreen('settings');
+            currentState = STATE.SETTINGS;
+        };
         document.getElementById('btn-back-main').onclick = () => UI.showScreen('menu');
+        document.getElementById('btn-back-settings').onclick = () => {
+            // Return to where we came from
+            if (previousState === STATE.PAUSED) {
+                UI.showScreen('pause');
+                currentState = STATE.PAUSED;
+            } else {
+                UI.showScreen('menu');
+                currentState = STATE.MENU;
+            }
+        };
+
+        // Settings Listeners
+        const sfxSlider = document.getElementById('vol-sfx');
+        const sfxVal = document.getElementById('vol-sfx-val');
+        sfxSlider.oninput = (e) => {
+            const v = e.target.value;
+            AudioFX.sfxVolume = v / 100;
+            sfxVal.textContent = `${v}%`;
+            // Test sound (debounced ideally, but okay for direct feedback)
+            // AudioFX.playTone(400, 'sine', 0.1, 0.1); 
+        };
+        // Init SFX Slider logic
+        sfxSlider.value = AudioFX.sfxVolume * 100;
+        sfxVal.textContent = `${sfxSlider.value}%`;
+
+        const musicSlider = document.getElementById('vol-music');
+        const musicVal = document.getElementById('vol-music-val');
+        musicSlider.oninput = (e) => {
+            const v = e.target.value;
+            AudioFX.musicVolume = v / 100;
+            AudioFX.updateMusicVolume();
+            musicVal.textContent = `${v}%`;
+        };
+        // Init Music Slider logic (Sync with default)
+        musicSlider.value = AudioFX.musicVolume * 100;
+        musicVal.textContent = `${musicSlider.value}%`;
 
         document.getElementById('btn-pause').onclick = () => UI.togglePause();
         document.getElementById('btn-resume').onclick = () => UI.togglePause();
+        document.getElementById('btn-settings-pause').onclick = () => {
+            previousState = STATE.PAUSED;
+            UI.showScreen('settings');
+            currentState = STATE.SETTINGS;
+        };
         document.getElementById('btn-quit').onclick = () => this.quitToMenu();
 
         // Difficulty Buttons
         document.getElementById('btn-diff-up').onclick = () => this.changeDifficulty(1);
         document.getElementById('btn-diff-down').onclick = () => this.changeDifficulty(-1);
         this.updateDifficultyDisplay(); // Init text
+
+        // Mode Selector Buttons
+        document.getElementById('btn-mode-prev').onclick = () => this.changeMode(-1);
+        document.getElementById('btn-mode-next').onclick = () => this.changeMode(1);
+        this.updateModeDisplay();
 
         document.getElementById('btn-retry').onclick = () => this.startRun();
         document.getElementById('btn-menu').onclick = () => this.quitToMenu();
@@ -763,6 +959,19 @@ const Game = {
         if (difficultyIndex < 0) difficultyIndex = 0;
         if (difficultyIndex >= DIFFICULTY_LEVELS.length) difficultyIndex = DIFFICULTY_LEVELS.length - 1;
         this.updateDifficultyDisplay();
+    },
+
+    changeMode(dir) {
+        gameMode += dir;
+        if (gameMode < 0) gameMode = GAME_MODES.length - 1;
+        if (gameMode >= GAME_MODES.length) gameMode = 0;
+        this.updateModeDisplay();
+    },
+
+    updateModeDisplay() {
+        const m = GAME_MODES[gameMode];
+        document.getElementById('mode-display').innerText = m.name;
+        document.getElementById('mode-desc').innerText = m.desc;
     },
 
     updateDifficultyDisplay() {
@@ -792,11 +1001,16 @@ const Game = {
         this.pickups = [];
         this.particles = [];
         this.enemySpawnTimer = 0;
+        this.sideLaneTimer = 0;
+        this.heartSpawnTimer = 20; // 20 seconds start
 
         score = 0;
         gameTime = 0;
         killCount = 0;
+        lives = 10;
         coinsRun = 0;
+        this.speedUpsWave = 0;
+        this.wave = 0; // Init Wave Count
 
         UI.showScreen('hud');
         UI.updateHUD();
@@ -808,6 +1022,35 @@ const Game = {
         UI.showScreen('menu');
         currentState = STATE.MENU;
         UI.elements.menuCoins.textContent = saveData.coins;
+    },
+
+    loseLife() {
+        lives--;
+        AudioFX.damage(); // Sound
+        game.shake = 20; // Big shake
+        // Flash screen logic could go here
+
+        UI.updateHUD();
+        if (lives <= 0) {
+            lives = 0;
+            this.gameOver();
+        }
+    },
+
+    gainLife() {
+        lives++;
+        UI.updateHUD();
+        this.addNotification("EXTRA LIFE!", "#ff0066");
+    },
+
+    spawnExplosion(x, y, color, count = 10, speedScale = 100) {
+        for (let i = 0; i < count; i++) {
+            this.particles.push(new Particle(
+                x, y, color,
+                () => Math.random() * speedScale,
+                () => Math.random() * 4 + 2
+            ));
+        }
     },
 
     gameOver() {
@@ -831,15 +1074,41 @@ const Game = {
         }
     },
 
-    addNotification(text, color) {
+    addNotification(text, color, size = 'normal') {
         notifications.push({
             text: text,
             color: color,
+            size: size,
             x: this.player.x,
             y: this.player.y - 50,
             life: 2.0, // seconds
             vy: -50 // float speed
         });
+    },
+
+    spawnWave(waveNum) {
+        // Reset Wave Limits
+        this.speedUpsWave = 0;
+
+        // Visual Notification
+        const color = waveNum % 5 === 0 ? '#ff0000' : '#bd00ff';
+        this.addNotification(`WAVE ${waveNum} INCOMING!`, color, 'big');
+
+        // Wave Logic
+        // Increased Wave Density
+        const base = 10;
+        const perWave = 5; // Previously 2
+        const count = base + (waveNum * perWave); // Wave 3 = 25 enemies
+
+        for (let i = 0; i < count; i++) {
+            // Slight delay between spawns so they don't overlap perfectly
+            setTimeout(() => {
+                if (currentState === STATE.PLAYING) {
+                    const type = waveNum % 3 === 0 ? 'tank' : 'fast';
+                    this.enemies.push(new Enemy(type));
+                }
+            }, i * 50); // Faster spawn release (50ms)
+        }
     },
 
     spawnEnemy() {
@@ -870,6 +1139,13 @@ const Game = {
         Input.update(deltaTime);
         gameTime += deltaTime;
 
+        // Wave Check (Every 60 seconds)
+        const newWave = Math.floor(gameTime / 60) + 1;
+        if (newWave > this.wave) {
+            this.wave = newWave;
+            this.spawnWave(this.wave);
+        }
+
         // Spawning
         const diff = DIFFICULTY_LEVELS[difficultyIndex];
         this.enemySpawnTimer -= deltaTime * 1000 * diff.spawnMult; // Apply Spawn Mult
@@ -878,6 +1154,69 @@ const Game = {
             // Scale difficulty
             const currentSpawnRate = Math.max(200, CONFIG.baseEnemySpawnRate * Math.pow(CONFIG.difficultyScale, gameTime / 10));
             this.enemySpawnTimer = currentSpawnRate;
+        }
+
+        // Side Lane Logistics (Modes 2 & 3)
+        // Spawn upgrades in Left Lane, Allies in Right Lane
+        if (gameMode > 0) {
+            this.sideLaneTimer -= deltaTime;
+            if (this.sideLaneTimer <= 0) {
+                // Determine spawn type based on mode and random chance
+                let spawnSide = 'none';
+
+                // Mode 2: Left Lane Only
+                if (gameMode === 1) {
+                    spawnSide = 'left';
+                }
+                // Mode 3: Left or Right
+                else if (gameMode === 2) {
+                    spawnSide = Math.random() < 0.5 ? 'left' : 'right';
+                }
+
+                // Calculate spawn X in the CENTER of edge lanes
+                // Edge lane is between mainHalf and edgeOuter
+                const edgeLaneCenter = (CONFIG.lanes.mainHalf + CONFIG.lanes.edgeOuter) / 2;
+                const safeLeftX = -edgeLaneCenter;
+                const safeRightX = edgeLaneCenter;
+
+                if (spawnSide === 'left') {
+                    // Spawn Upgrade
+                    // Filter out Speed if already taken this wave
+                    const available = UPGRADE_POOL.filter(u => u.id !== 'mov' || game.speedUpsWave < 1);
+
+                    if (available.length > 0) {
+                        const idx = Math.floor(Math.random() * available.length);
+                        const upgrade = available[idx];
+                        game.pickups.push(new Pickup(safeLeftX, 50, 1, 'upgrade', upgrade));
+                    }
+
+                    // Debug Visual
+                    // this.addNotification("LEFT LOOT", "#00ff00");
+                } else if (spawnSide === 'right') {
+                    // Spawn Ally
+                    const ms = UPGRADE_POOL.find(u => u.id === 'cnt');
+                    let p = new Pickup(safeRightX, 50, 1, 'upgrade', ms);
+                    p.color = '#00ffff';
+                    game.pickups.push(p);
+
+                    // Debug Visual
+                    // this.addNotification("RIGHT ALLY", "#00ffff");
+                }
+
+                this.sideLaneTimer = 2.0; // Spawn every 2 seconds roughly
+            }
+        }
+
+        // Heart Spawner (Every 20s) - Left Lane
+        this.heartSpawnTimer -= deltaTime;
+        if (this.heartSpawnTimer <= 0) {
+            // Spawn Heart in center of left edge lane
+            const healUp = UPGRADE_POOL.find(u => u.id === 'hp');
+            const edgeLaneCenter = (CONFIG.lanes.mainHalf + CONFIG.lanes.edgeOuter) / 2;
+            game.pickups.push(new Pickup(-edgeLaneCenter, 50, 1, 'upgrade', healUp));
+            this.addNotification("HEART SPAWNED!", "#ff0066");
+
+            this.heartSpawnTimer = 20;
         }
 
         this.player.update(deltaTime);
@@ -922,11 +1261,12 @@ const Game = {
                     if (!p.hitList.includes(e)) {
                         e.takeDamage(p.damage);
                         p.hitList.push(e);
+                        AudioFX.hit(); // Sound
                         if (p.hitList.length >= p.pierce) {
                             p.markedForDeletion = true;
                         }
                         // Spark
-                        this.particles.push(new Particle(e.x, e.y, '#fff'));
+                        this.spawnExplosion(e.x, e.y, '#fff', 2, 50);
                     }
                 }
             });
@@ -979,6 +1319,36 @@ const Game = {
         ctx.lineTo(laneRight, canvas.height);
         ctx.stroke();
 
+        // Draw Extra Lane Dividers (Edge lanes for power-ups)
+        if (gameMode >= 1) {
+            // Left inner divider (main lane boundary)
+            ctx.beginPath();
+            ctx.moveTo(centerX - CONFIG.lanes.mainHalf, 0);
+            ctx.lineTo(centerX - CONFIG.lanes.mainHalf, canvas.height);
+            ctx.stroke();
+
+            // Outer Left (edge lane boundary)
+            ctx.beginPath();
+            ctx.moveTo(centerX - CONFIG.lanes.edgeOuter, 0);
+            ctx.lineTo(centerX - CONFIG.lanes.edgeOuter, canvas.height);
+            ctx.stroke();
+        }
+        if (gameMode === 2) {
+            // Right inner divider (main lane boundary)
+            ctx.beginPath();
+            ctx.moveTo(centerX + CONFIG.lanes.mainHalf, 0);
+            ctx.lineTo(centerX + CONFIG.lanes.mainHalf, canvas.height);
+            ctx.stroke();
+
+            // Outer Right (edge lane boundary)
+            ctx.beginPath();
+            ctx.moveTo(centerX + CONFIG.lanes.edgeOuter, 0);
+            ctx.lineTo(centerX + CONFIG.lanes.edgeOuter, canvas.height);
+            ctx.stroke();
+        }
+        ctx.lineTo(laneRight, canvas.height);
+        ctx.stroke();
+
         this.pickups.forEach(p => p.draw(ctx));
         this.enemies.forEach(e => e.draw(ctx)); // Draw enemies under player
         this.player.draw(ctx);
@@ -987,15 +1357,24 @@ const Game = {
 
         // Draw Notifications
         ctx.textAlign = 'center';
-        ctx.font = 'bold 20px "Orbitron", sans-serif';
         notifications.forEach(n => {
-            const screenX = centerX + n.x;
+            let screenX = centerX + n.x;
+            let screenY = n.y;
+            let font = 'bold 20px "Orbitron", sans-serif';
+
+            if (n.size === 'big') {
+                font = 'bold 60px "Orbitron", sans-serif';
+                screenX = centerX; // Absolute center
+                screenY = canvas.height * 0.3; // Fixed top-ish position
+            }
+
+            ctx.font = font;
             ctx.fillStyle = n.color;
             ctx.shadowBlur = 5;
             ctx.shadowColor = n.color;
             // Fade out
             ctx.globalAlpha = Math.min(1, n.life);
-            ctx.fillText(n.text, screenX, n.y);
+            ctx.fillText(n.text, screenX, screenY);
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
         });

@@ -200,6 +200,9 @@ button:active {
     line-height: 1.5;
     white-space: pre;
     z-index: 20;
+    height: auto;
+    /* Ensure it grows */
+    min-width: 100px;
 }
 
 .top-bar,
@@ -436,6 +439,70 @@ button:active {
 
 .pulse {
     animation: pulse 2s infinite;
+}
+
+/* Settings Styles */
+.settings-container {
+    width: 80%;
+    max-width: 400px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2rem;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.setting-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.setting-row label {
+    color: var(--primary);
+    font-family: var(--font-head);
+    letter-spacing: 1px;
+}
+
+.setting-row input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    background: rgba(0, 0, 0, 0.3);
+    height: 8px;
+    border-radius: 4px;
+    outline: none;
+}
+
+.setting-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    background: var(--primary);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px var(--primary);
+    transition: transform 0.1s;
+}
+
+.setting-row input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.setting-desc {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 1rem;
+    font-style: italic;
+}
+
+#vol-sfx-val,
+#vol-music-val {
+    text-align: right;
+    font-size: 0.9rem;
+    color: var(--secondary);
 }
 
 /* Mobile Adjustments */
