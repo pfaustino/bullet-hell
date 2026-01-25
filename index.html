@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Channel Survivor</title>
+    <meta name="description" content="Survive the horde in this top-down bullet heaven game.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Overlay container -->
+    <div id="ui-layer">
+
+        <!-- Main Menu -->
+        <div id="main-menu" class="screen active">
+            <h1 class="game-title">CHANNEL<br><span class="highlight">SURVIVOR</span></h1>
+            <div class="menu-buttons">
+                <button id="btn-play" class="primary-btn">PLAY</button>
+                <button id="btn-upgrades" class="secondary-btn">UPGRADES</button>
+                <button id="btn-settings" class="secondary-btn">SETTINGS</button>
+            </div>
+            <div class="meta-currency">
+                <span>COINS: <span id="menu-coins">0</span></span>
+            </div>
+        </div>
+
+        <!-- Meta Upgrades Menu -->
+        <div id="upgrades-menu" class="screen hidden">
+            <h2>PERMANENT UPGRADES</h2>
+            <div id="upgrades-list" class="scroll-container">
+                <!-- Upgrades injected here via JS -->
+            </div>
+            <div class="menu-footer">
+                <div class="meta-currency">COINS: <span id="shop-coins">0</span></div>
+                <button id="btn-back-main" class="secondary-btn">BACK</button>
+            </div>
+        </div>
+
+        <!-- HUD -->
+        <div id="hud" class="screen hidden overlay">
+            <div class="top-bar">
+                <div class="bar-container hp-container">
+                    <div id="hp-bar-fill" class="bar-fill"></div>
+                    <span class="bar-text">HP</span>
+                </div>
+                <div class="score-container">
+                    <div id="timer">00:00</div>
+                    <div id="kill-count">💀 0</div>
+                </div>
+                <button id="btn-pause" class="icon-btn">⏸</button>
+            </div>
+
+            <!-- Stats Box -->
+            <div id="stat-debug-box" class="stats-box">
+                STATS INIT...
+            </div>
+
+            <div class="bottom-bar">
+                <div class="bar-container xp-container">
+                    <div id="xp-bar-fill" class="bar-fill"></div>
+                    <span class="bar-text">XP LEVEL <span id="level-indicator">1</span></span>
+                </div>
+                <div class="coin-display">
+                    🪙 <span id="game-coins">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Level Up / Upgrade Selection -->
+        <div id="levelup-screen" class="screen hidden overlay glass-panel">
+            <h2>LEVEL UP!</h2>
+            <p>Choose an upgrade</p>
+            <div id="card-container" class="cards-layout">
+                <!-- Cards injected via JS -->
+            </div>
+        </div>
+
+        <!-- Pause Menu -->
+        <div id="pause-menu" class="screen hidden overlay glass-panel">
+            <h2>PAUSED</h2>
+            <div class="menu-buttons">
+                <button id="btn-resume" class="primary-btn">RESUME</button>
+
+                <div class="difficulty-control" style="margin: 1rem 0; text-align: center;">
+                    <h3>DIFFICULTY</h3>
+                    <div style="display: flex; gap: 10px; justify-content: center; align-items: center;">
+                        <button id="btn-diff-down" class="secondary-btn" style="width: 40px;">-</button>
+                        <span id="diff-display"
+                            style="font-size: 1.5rem; font-weight: bold; color: var(--primary);">LEVEL 1</span>
+                        <button id="btn-diff-up" class="secondary-btn" style="width: 40px;">+</button>
+                    </div>
+                    <p id="diff-desc" style="font-size: 0.8rem; color: #888; margin-top: 5px;">Easiest (Current)</p>
+                </div>
+
+                <button id="btn-quit" class="secondary-btn danger">QUIT TO MENU</button>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="screen hidden overlay glass-panel">
+            <h1 class="danger-text">GAME OVER</h1>
+            <div class="stats-summary">
+                <div class="stat-row"><span>Time Survived:</span> <span id="go-time">00:00</span></div>
+                <div class="stat-row"><span>Enemies Defeated:</span> <span id="go-kills">0</span></div>
+                <div class="stat-row"><span>Coins Earned:</span> <span id="go-coins">0</span></div>
+            </div>
+            <div class="menu-buttons">
+                <button id="btn-retry" class="primary-btn">RETRY</button>
+                <button id="btn-menu" class="secondary-btn">MAIN MENU</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="game_v3.js"></script>
+</body>
+
+</html>
