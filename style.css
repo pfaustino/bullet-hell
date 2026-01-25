@@ -511,33 +511,33 @@ button:active {
         font-size: 2.5rem;
     }
 
-    /* Larger buttons for touch */
+    /* Larger buttons for touch - 50% bigger */
     button {
-        padding: 1.2rem 1.5rem;
-        font-size: 1.3rem;
-        min-height: 56px;
+        padding: 1.8rem 2.25rem;
+        font-size: 2rem;
+        min-height: 84px;
     }
 
     .menu-buttons {
-        width: 90%;
-        max-width: 350px;
-        gap: 1.2rem;
+        width: 95%;
+        max-width: 400px;
+        gap: 1.8rem;
     }
 
     .primary-btn {
-        padding: 1.4rem 2rem;
-        font-size: 1.5rem;
+        padding: 2.1rem 3rem;
+        font-size: 2.25rem;
     }
 
     .secondary-btn {
-        padding: 1.2rem 1.5rem;
-        font-size: 1.2rem;
+        padding: 1.8rem 2.25rem;
+        font-size: 1.8rem;
     }
 
     .icon-btn {
-        width: 50px;
-        height: 50px;
-        font-size: 1.5rem;
+        width: 75px;
+        height: 75px;
+        font-size: 2.25rem;
     }
 
     .bar-container {
