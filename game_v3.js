@@ -1,5 +1,5 @@
 /**
- * Channel Survivor - Game Logic
+ * Bullet Hell - Game Logic
  * A top-down horde survival game.
  */
 
@@ -96,9 +96,9 @@ const defaultSave = {
     }
 };
 
-if (localStorage.getItem('channelSurvivorSave')) {
+if (localStorage.getItem('bulletHellSave')) {
     try {
-        const loaded = JSON.parse(localStorage.getItem('channelSurvivorSave'));
+        const loaded = JSON.parse(localStorage.getItem('bulletHellSave'));
         // Merge with defaults to prevent missing keys/NaN
         saveData = {
             coins: typeof loaded.coins === 'number' ? loaded.coins : 0,
@@ -1056,7 +1056,7 @@ const Game = {
     gameOver() {
         currentState = STATE.GAME_OVER;
         saveData.coins += coinsRun;
-        localStorage.setItem('channelSurvivorSave', JSON.stringify(saveData));
+        localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
 
         UI.elements.goTime.textContent = UI.elements.timer.textContent;
         UI.elements.goKills.textContent = killCount;
@@ -1069,7 +1069,7 @@ const Game = {
         if (saveData.coins >= cost) {
             saveData.coins -= cost;
             saveData.upgrades[id] = (saveData.upgrades[id] || 0) + 1;
-            localStorage.setItem('channelSurvivorSave', JSON.stringify(saveData));
+            localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
             UI.renderShop(); // Refresh
         }
     },
