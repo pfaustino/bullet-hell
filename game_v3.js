@@ -6,10 +6,10 @@
 // --- CONFIGURATION & CONSTANTS ---
 // --- CONFIGURATION & CONSTANTS ---
 const CONFIG = {
-    laneWidth: 600,
     fps: 60,
     baseEnemySpawnRate: 1000,
     difficultyScale: 0.98,
+    maxMainColumns: 6,  // Maximum columns in main lane
     colors: {
         player: '#00f2ff',
         bullet: '#ffe600',
@@ -21,20 +21,15 @@ const CONFIG = {
         upgrade: '#00ff00',
         laneBorder: '#ffffff20'
     },
-    // Lane configuration (relative to centerX)
+    // Lane configuration (calculated dynamically for portrait mode)
+    // Will be set in resize() based on screen width
     lanes: {
-        mainHalf: 200,      // Main lane: -200 to +200 (enemies spawn here)
-        edgeInner: 200,     // Edge lane inner boundary  
-        edgeOuter: 320      // Edge lane outer boundary (power-ups fall here)
+        mainHalf: 150,      // Main lane half-width (will be recalculated)
+        edgeWidth: 60,      // Edge lane width (left and right)
+        columnWidth: 50,    // Width per column in main lane
+        actualColumns: 6    // Actual number of columns (will be recalculated)
     }
 };
-
-const GAME_MODES = [
-    { id: 0, name: "1 LANE", desc: "Classic: Loot from Kills", lanes: ['main'] },
-    { id: 1, name: "2 LANE", desc: "Left Lane: Upgrades", lanes: ['left', 'main'] },
-    { id: 2, name: "3 LANE", desc: "Right Lane: Allies", lanes: ['left', 'main', 'right'] }
-];
-let gameMode = 0; // Index into GAME_MODES
 
 const UPGRADE_POOL = [
     { id: 'dmg', name: 'DAMAGE UP', icon: '⚔️', color: '#ff0055', weight: 1, apply: (p) => { p.stats.damageMult += 0.2; } },
@@ -168,6 +163,12 @@ class Player {
             }
         ];
 
+        // Special Weapons (temporary power-ups)
+        this.specialWeapons = [];
+
+        // Allies (companion ships)
+        this.allies = [];
+
         // Experience
         this.level = 1;
         this.xp = 0;
@@ -177,27 +178,33 @@ class Player {
     update(dt) {
         // Movement is handled by input directly influencing x/y for instant feel
         // But we apply boundary checks here
-        // Calculate movement bounds based on Game Mode
-        const mode = GAME_MODES[gameMode];
-        let minX = -CONFIG.laneWidth / 2;
-        let maxX = CONFIG.laneWidth / 2;
+        // Always 3-lane mode: Left Edge, Main, Right Edge
+        // Main lane: [-mainHalf, +mainHalf]
+        // Left edge: [-mainHalf - edgeWidth, -mainHalf]
+        // Right edge: [+mainHalf, +mainHalf + edgeWidth]
+        const mainHalf = CONFIG.lanes.mainHalf;
+        const edgeWidth = CONFIG.lanes.edgeWidth;
+        
+        const minX = -mainHalf - edgeWidth + (this.width / 2);
+        const maxX = mainHalf + edgeWidth - (this.width / 2);
 
-        if (mode.lanes.includes('left')) minX -= 150; // Side lane width
-        if (mode.lanes.includes('right')) maxX += 150;
-
-        const laneHalf = (Math.min(canvas.width, CONFIG.laneWidth) / 2) - (this.width / 2);
-
-        // Actually, let's use the explicit bounds relative to CenterX(0)
-        // Main Lane is always [-300, 300]
-        // Left Lane is [-450, -300]
-        // Right Lane is [300, 450]
-
-        // Override basic lane clamp
-        if (this.x < minX + (this.width / 2)) this.x = minX + (this.width / 2);
-        if (this.x > maxX - (this.width / 2)) this.x = maxX - (this.width / 2);
+        // Clamp player position to 3-lane bounds
+        if (this.x < minX) this.x = minX;
+        if (this.x > maxX) this.x = maxX;
 
         // Update Weapons
         this.weapons.forEach(w => w.update(dt, this));
+        
+        // Update Special Weapons
+        this.specialWeapons.forEach(sw => {
+            if (sw.update) sw.update(dt, this);
+        });
+        
+        // Update Allies
+        this.allies.forEach((ally, index) => {
+            ally.formationAngle = (index / Math.max(1, this.allies.length)) * Math.PI * 2;
+            ally.update(dt, this);
+        });
     }
 
     shootBasic(weapon) {
@@ -289,20 +296,28 @@ class Player {
 }
 
 class Projectile {
-    constructor(x, y, damage, speed, pierce) {
+    constructor(x, y, damage, speed, pierce, angle = -Math.PI / 2) {
         this.x = x;
         this.y = y;
         this.damage = damage;
         this.speed = speed;
         this.pierce = pierce;
+        this.angle = angle; // Direction angle (default: straight up)
         this.radius = 4;
         this.markedForDeletion = false;
         this.hitList = []; // Enemies already hit
     }
 
     update(dt) {
-        this.y -= this.speed * dt;
-        if (this.y < 0) this.markedForDeletion = true;
+        // Move in direction
+        this.x += Math.cos(this.angle) * this.speed * dt;
+        this.y += Math.sin(this.angle) * this.speed * dt;
+        
+        // Remove if off screen
+        if (this.y < -50 || this.y > canvas.height + 50 || 
+            this.x < -canvas.width/2 || this.x > canvas.width/2) {
+            this.markedForDeletion = true;
+        }
     }
 
     draw(ctx) {
@@ -336,21 +351,21 @@ class Enemy {
         // Reverted Speed Scaling
 
         if (type === 'fast') {
-            this.hp = (10 + (gameTime * 1.0)) * hpMult;
+            this.hp = ((10 + (gameTime * 1.0)) * hpMult) / 2; // Half health
             this.speed = 150;
             this.color = CONFIG.colors.enemyFast;
             this.radius = 12;
             this.xpValue = 15;
             this.icon = '⚡';
         } else if (type === 'tank') {
-            this.hp = (100 + (gameTime * 5.0)) * hpMult;
+            this.hp = ((100 + (gameTime * 5.0)) * hpMult) / 2; // Half health
             this.speed = 40;
             this.color = CONFIG.colors.enemyTank;
             this.radius = 25;
             this.xpValue = 50;
             this.icon = '👹';
         } else { // Basic
-            this.hp = (20 + (gameTime * 2.0)) * hpMult;
+            this.hp = ((20 + (gameTime * 2.0)) * hpMult) / 2; // Half health
             this.speed = 80;
             this.color = CONFIG.colors.enemyBasic;
             this.xpValue = 10;
@@ -387,27 +402,11 @@ class Enemy {
         AudioFX.explode(); // Sound
         game.spawnExplosion(this.x, this.y, this.color, 20, 300); // Massive visual
 
-        // Drop Chance Logic - INCREASED DROP RATE
+        // Drop Chance Logic - Always 3-lane mode: Only coins drop from enemies
+        // Upgrades spawn in side lanes instead
         const roll = Math.random();
-
-        if (gameMode === 0) {
-            if (roll < 0.40) { // 40% Chance for Upgrade Drop (Mode 1)
-                // Filter out Speed if already taken this wave
-                const available = UPGRADE_POOL.filter(u => u.id !== 'mov' || game.speedUpsWave < 1);
-
-                if (available.length > 0) {
-                    const idx = Math.floor(Math.random() * available.length);
-                    const upgrade = available[idx];
-                    game.pickups.push(new Pickup(this.x, this.y, 1, 'upgrade', upgrade));
-                }
-            } else if (roll < 0.60) {
-                game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
-            }
-        } else {
-            // Modes 2 & 3: Only coins drop from enemies
-            if (roll < 0.20) {
-                game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
-            }
+        if (roll < 0.20) {
+            game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
         }
     }
 
@@ -437,12 +436,15 @@ class Pickup {
         this.x = x;
         this.y = y;
         this.amount = amount;
-        this.type = type; // 'upgrade', 'coin'
-        this.data = data; // Upgrade object
-        this.radius = type === 'upgrade' ? 12 : 6;
+        this.type = type; // 'upgrade', 'coin', 'ally', 'special_weapon', 'strong_ally'
+        this.data = data; // Upgrade object or ally data
+        this.radius = type === 'upgrade' || type === 'ally' || type === 'strong_ally' || type === 'special_weapon' ? 15 : 6;
         this.markedForDeletion = false;
         this.magnetized = false;
-        this.color = type === 'upgrade' ? data.color : '#ffee00';
+        this.isStrongAlly = type === 'strong_ally';
+        this.color = type === 'upgrade' ? (data ? data.color : '#00ff00') : 
+                     type === 'ally' || type === 'strong_ally' ? '#00ff88' :
+                     type === 'special_weapon' ? '#ff00ff' : '#ffee00';
     }
 
     update(dt, player) {
@@ -474,7 +476,21 @@ class Pickup {
                     // Notify
                     Game.addNotification(this.data.name, this.data.color);
                     AudioFX.powerup(); // Sound
+                } else if (this.type === 'ally' || this.type === 'strong_ally') {
+                    // Add ally ship
+                    const newAlly = new Ally(player.x, player.y, this.isStrongAlly);
+                    player.allies.push(newAlly);
+                    Game.addNotification(this.isStrongAlly ? "STRONG ALLY JOINED!" : "ALLY JOINED!", "#00ff88");
+                    AudioFX.powerup();
+                } else if (this.type === 'special_weapon') {
+                    // Add special weapon (temporary)
+                    if (this.data && this.data.apply) {
+                        this.data.apply(player);
+                        Game.addNotification(this.data.name || "SPECIAL WEAPON!", "#ff00ff");
+                        AudioFX.powerup();
+                    }
                 } else {
+                    // Coin
                     const mult = 1 + (saveData.upgrades.coinGain * 0.2);
                     const val = Math.ceil(this.amount * mult);
                     coinsRun += val;
@@ -494,7 +510,6 @@ class Pickup {
         if (this.type === 'upgrade') {
             // Draw Floating Emoji
             const size = 30;
-            // Pulse size
             const pulse = 1 + (Math.sin(gameTime * 5) * 0.2);
 
             ctx.translate(screenX, this.y);
@@ -507,7 +522,6 @@ class Pickup {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            // Icon
             const icon = this.data.icon || '💎';
             ctx.fillText(icon, 0, 0);
 
@@ -515,6 +529,51 @@ class Pickup {
             ctx.scale(1 / pulse, 1 / pulse);
             ctx.translate(-screenX, -this.y);
 
+        } else if (this.type === 'ally' || this.type === 'strong_ally') {
+            // Draw ally ship icon
+            const size = 25;
+            const pulse = 1 + (Math.sin(gameTime * 4) * 0.15);
+            
+            ctx.translate(screenX, this.y);
+            ctx.scale(pulse, pulse);
+            
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.color;
+            ctx.fillStyle = this.color;
+            
+            // Draw small ship shape
+            ctx.beginPath();
+            ctx.moveTo(0, -size * 0.6);
+            ctx.lineTo(size * 0.5, size * 0.5);
+            ctx.lineTo(0, size * 0.3);
+            ctx.lineTo(-size * 0.5, size * 0.5);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.shadowBlur = 0;
+            ctx.scale(1 / pulse, 1 / pulse);
+            ctx.translate(-screenX, -this.y);
+            
+        } else if (this.type === 'special_weapon') {
+            // Draw special weapon icon
+            const size = 30;
+            const pulse = 1 + (Math.sin(gameTime * 6) * 0.25);
+            
+            ctx.translate(screenX, this.y);
+            ctx.scale(pulse, pulse);
+            
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = this.color;
+            
+            ctx.font = `${size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('⚡', 0, 0);
+            
+            ctx.shadowBlur = 0;
+            ctx.scale(1 / pulse, 1 / pulse);
+            ctx.translate(-screenX, -this.y);
+            
         } else {
             // Coin
             const size = 20;
@@ -526,6 +585,102 @@ class Pickup {
             ctx.fillText('🪙', screenX, this.y);
             ctx.shadowBlur = 0;
         }
+    }
+}
+
+class Ally {
+    constructor(x, y, isStrong = false) {
+        this.x = x;
+        this.y = y;
+        this.isStrong = isStrong;
+        this.radius = isStrong ? 20 : 15;
+        this.width = isStrong ? 35 : 30;
+        this.height = isStrong ? 35 : 30;
+        
+        // Combat stats
+        this.fireTimer = 0;
+        this.cooldown = isStrong ? 0.3 : 0.4;
+        this.damage = isStrong ? 20 : 12;
+        this.projectileSpeed = 600;
+        
+        // Formation position relative to player
+        this.formationOffset = 0; // Will be set when added
+        this.formationAngle = 0; // For circular formation
+    }
+
+    update(dt, player) {
+        // Position relative to player in formation
+        const formationRadius = 60;
+        const angle = this.formationAngle + (gameTime * 0.5); // Slow rotation
+        this.x = player.x + Math.cos(angle) * formationRadius;
+        this.y = player.y + Math.sin(angle) * formationRadius;
+        
+        // Auto-attack nearest enemy
+        this.fireTimer -= dt;
+        if (this.fireTimer <= 0) {
+            const nearestEnemy = this.findNearestEnemy();
+            if (nearestEnemy) {
+                this.shoot(nearestEnemy);
+                this.fireTimer = this.cooldown;
+            }
+        }
+    }
+
+    findNearestEnemy() {
+        let nearest = null;
+        let minDist = Infinity;
+        
+        if (Game && Game.enemies) {
+            Game.enemies.forEach(e => {
+                const dx = e.x - this.x;
+                const dy = e.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < minDist && dist < 800) { // Max range
+                    minDist = dist;
+                    nearest = e;
+                }
+            });
+        }
+        
+        return nearest;
+    }
+
+    shoot(target) {
+        AudioFX.shoot();
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const angle = Math.atan2(dy, dx);
+        
+        if (Game && Game.projectiles) {
+            Game.projectiles.push(new Projectile(
+                this.x,
+                this.y,
+                this.damage,
+                this.projectileSpeed,
+                1,
+                angle // Direction
+            ));
+        }
+    }
+
+    draw(ctx) {
+        const screenX = centerX + this.x;
+        const screenY = this.y;
+        
+        // Draw ally ship (smaller version of player ship)
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.isStrong ? '#00ffff' : '#00ff88';
+        ctx.fillStyle = this.isStrong ? '#00ffff' : '#00ff88';
+        
+        ctx.beginPath();
+        ctx.moveTo(screenX, screenY - (this.height * 0.6));
+        ctx.lineTo(screenX + (this.width * 0.5), screenY + (this.height * 0.5));
+        ctx.lineTo(screenX, screenY + (this.height * 0.3));
+        ctx.lineTo(screenX - (this.width * 0.5), screenY + (this.height * 0.5));
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.shadowBlur = 0;
     }
 }
 
@@ -856,8 +1011,11 @@ const Game = {
     pickups: [],
     particles: [],
     enemySpawnTimer: 0,
-    sideLaneTimer: 0, // For upgrades/allies
-    heartSpawnTimer: 0, // New: Hearts every 20s
+    allySpawnTimer: 0, // For ally ships in right lane
+    specialWeaponTimer: 0, // For special weapons in left lane (every 10s)
+    waveBreakTimer: 0, // Break between waves
+    currentWave: 0,
+    isWaveActive: false,
     shake: 0,
 
     init() {
@@ -939,11 +1097,6 @@ const Game = {
         document.getElementById('btn-diff-down').onclick = () => this.changeDifficulty(-1);
         this.updateDifficultyDisplay(); // Init text
 
-        // Mode Selector Buttons
-        document.getElementById('btn-mode-prev').onclick = () => this.changeMode(-1);
-        document.getElementById('btn-mode-next').onclick = () => this.changeMode(1);
-        this.updateModeDisplay();
-
         document.getElementById('btn-retry').onclick = () => this.startRun();
         document.getElementById('btn-menu').onclick = () => this.quitToMenu();
 
@@ -961,18 +1114,6 @@ const Game = {
         this.updateDifficultyDisplay();
     },
 
-    changeMode(dir) {
-        gameMode += dir;
-        if (gameMode < 0) gameMode = GAME_MODES.length - 1;
-        if (gameMode >= GAME_MODES.length) gameMode = 0;
-        this.updateModeDisplay();
-    },
-
-    updateModeDisplay() {
-        const m = GAME_MODES[gameMode];
-        document.getElementById('mode-display').innerText = m.name;
-        document.getElementById('mode-desc').innerText = m.desc;
-    },
 
     updateDifficultyDisplay() {
         const d = DIFFICULTY_LEVELS[difficultyIndex];
@@ -985,6 +1126,25 @@ const Game = {
         canvas.height = window.innerHeight;
         centerX = canvas.width / 2;
         centerY = canvas.height / 2;
+
+        // Calculate lane dimensions for portrait mode
+        // Ensure main lane fits max 6 columns, with edge lanes on sides
+        const screenWidth = canvas.width;
+        const edgeWidth = CONFIG.lanes.edgeWidth;
+        const columnWidth = CONFIG.lanes.columnWidth;
+        const maxMainWidth = CONFIG.maxMainColumns * columnWidth;
+        
+        // Calculate available width for main lane (leave padding on sides)
+        const padding = 20; // Padding from screen edges
+        const availableWidth = Math.max(0, screenWidth - (edgeWidth * 2) - (padding * 2));
+        
+        // Main lane width is the smaller of: available width or max width for 6 columns
+        const mainWidth = Math.min(availableWidth, maxMainWidth);
+        CONFIG.lanes.mainHalf = Math.max(50, mainWidth / 2); // Minimum 50px half-width
+        
+        // Recalculate actual number of columns that fit
+        const actualColumns = Math.floor((CONFIG.lanes.mainHalf * 2) / columnWidth);
+        CONFIG.lanes.actualColumns = Math.min(Math.max(1, actualColumns), CONFIG.maxMainColumns);
 
         if (this.player) {
             // Move player up to avoid bottom browser bars (15% from bottom)
@@ -1001,8 +1161,11 @@ const Game = {
         this.pickups = [];
         this.particles = [];
         this.enemySpawnTimer = 0;
-        this.sideLaneTimer = 0;
-        this.heartSpawnTimer = 20; // 20 seconds start
+        this.allySpawnTimer = 0;
+        this.specialWeaponTimer = 10; // Start at 10s so first spawn happens immediately
+        this.waveBreakTimer = 3; // 3 second break before first wave
+        this.currentWave = 0;
+        this.isWaveActive = false;
 
         score = 0;
         gameTime = 0;
@@ -1010,7 +1173,6 @@ const Game = {
         lives = 10;
         coinsRun = 0;
         this.speedUpsWave = 0;
-        this.wave = 0; // Init Wave Count
 
         UI.showScreen('hud');
         UI.updateHUD();
@@ -1086,41 +1248,50 @@ const Game = {
         });
     },
 
-    spawnWave(waveNum) {
-        // Reset Wave Limits
-        this.speedUpsWave = 0;
-
+    startWave(waveNum) {
+        this.isWaveActive = true;
+        this.currentWave = waveNum;
+        
         // Visual Notification
         const color = waveNum % 5 === 0 ? '#ff0000' : '#bd00ff';
-        this.addNotification(`WAVE ${waveNum} INCOMING!`, color, 'big');
+        this.addNotification(`WAVE ${waveNum} START!`, color, 'big');
 
-        // Wave Logic
-        // Increased Wave Density
-        const base = 10;
-        const perWave = 5; // Previously 2
-        const count = base + (waveNum * perWave); // Wave 3 = 25 enemies
-
-        for (let i = 0; i < count; i++) {
-            // Slight delay between spawns so they don't overlap perfectly
-            setTimeout(() => {
-                if (currentState === STATE.PLAYING) {
-                    const type = waveNum % 3 === 0 ? 'tank' : 'fast';
-                    this.enemies.push(new Enemy(type));
+        // Calculate wave parameters - start interspersed, get denser
+        const baseEnemies = 5 + (waveNum * 2); // Base count increases with wave
+        const spawnInterval = Math.max(200, 1000 - (waveNum * 50)); // Faster spawns as waves increase
+        const waveDuration = 30; // 30 seconds per wave
+        
+        let enemiesSpawned = 0;
+        const maxEnemies = baseEnemies + (waveNum * 3);
+        
+        const spawnEnemyInWave = () => {
+            if (enemiesSpawned < maxEnemies && this.isWaveActive && currentState === STATE.PLAYING) {
+                // Spawn enemy with interspersed timing
+                const r = Math.random();
+                let type = 'basic';
+                
+                if (waveNum > 2 && r < 0.3) type = 'fast';
+                if (waveNum > 4 && r < 0.1) type = 'tank';
+                
+                this.enemies.push(new Enemy(type));
+                enemiesSpawned++;
+                
+                // Schedule next spawn
+                if (enemiesSpawned < maxEnemies) {
+                    setTimeout(spawnEnemyInWave, spawnInterval + (Math.random() * spawnInterval * 0.5));
                 }
-            }, i * 50); // Faster spawn release (50ms)
-        }
-    },
-
-    spawnEnemy() {
-        // Probability based on time
-        const r = Math.random();
-        let type = 'basic';
-
-        if (gameTime > 60 && r < 0.2) type = 'fast';
-        if (gameTime > 120 && r < 0.05) type = 'tank';
-
-        // Pass difficulty mult to enemy
-        this.enemies.push(new Enemy(type));
+            }
+        };
+        
+        // Start spawning enemies
+        spawnEnemyInWave();
+        
+        // End wave after duration
+        setTimeout(() => {
+            this.isWaveActive = false;
+            this.waveBreakTimer = 5; // 5 second break between waves
+            this.addNotification(`WAVE ${waveNum} COMPLETE!`, '#00ff00', 'big');
+        }, waveDuration * 1000);
     },
 
     loop(timestamp) {
@@ -1139,84 +1310,53 @@ const Game = {
         Input.update(deltaTime);
         gameTime += deltaTime;
 
-        // Wave Check (Every 60 seconds)
-        const newWave = Math.floor(gameTime / 60) + 1;
-        if (newWave > this.wave) {
-            this.wave = newWave;
-            this.spawnWave(this.wave);
+        // Wave System with Breaks
+        if (!this.isWaveActive && this.waveBreakTimer <= 0) {
+            // Start new wave
+            this.startWave(this.currentWave + 1);
+        }
+        
+        if (!this.isWaveActive) {
+            this.waveBreakTimer -= deltaTime;
         }
 
-        // Spawning
-        const diff = DIFFICULTY_LEVELS[difficultyIndex];
-        this.enemySpawnTimer -= deltaTime * 1000 * diff.spawnMult; // Apply Spawn Mult
-        if (this.enemySpawnTimer <= 0) {
-            this.spawnEnemy();
-            // Scale difficulty
-            const currentSpawnRate = Math.max(200, CONFIG.baseEnemySpawnRate * Math.pow(CONFIG.difficultyScale, gameTime / 10));
-            this.enemySpawnTimer = currentSpawnRate;
+        // Special Weapons - Left Lane (every 10 seconds)
+        this.specialWeaponTimer -= deltaTime;
+        if (this.specialWeaponTimer <= 0) {
+            const mainHalf = CONFIG.lanes.mainHalf;
+            const edgeWidth = CONFIG.lanes.edgeWidth;
+            const edgeLaneCenter = mainHalf + (edgeWidth / 2);
+            const safeLeftX = -edgeLaneCenter;
+            
+            // Create special weapon pickup
+            const specialWeapon = {
+                name: "SPECIAL WEAPON",
+                apply: (p) => {
+                    // Temporary damage boost or special effect
+                    p.stats.damageMult += 0.5;
+                    setTimeout(() => {
+                        p.stats.damageMult -= 0.5;
+                    }, 10000); // 10 second duration
+                }
+            };
+            
+            game.pickups.push(new Pickup(safeLeftX, -50, 1, 'special_weapon', specialWeapon));
+            this.specialWeaponTimer = 10; // Every 10 seconds
         }
 
-        // Side Lane Logistics (Modes 2 & 3)
-        // Spawn upgrades in Left Lane, Allies in Right Lane
-        if (gameMode > 0) {
-            this.sideLaneTimer -= deltaTime;
-            if (this.sideLaneTimer <= 0) {
-                // Determine spawn type based on mode and random chance
-                let spawnSide = 'none';
-
-                // Mode 2: Left Lane Only
-                if (gameMode === 1) {
-                    spawnSide = 'left';
-                }
-                // Mode 3: Left or Right
-                else if (gameMode === 2) {
-                    spawnSide = Math.random() < 0.5 ? 'left' : 'right';
-                }
-
-                // Calculate spawn X in the CENTER of edge lanes
-                // Edge lane is between mainHalf and edgeOuter
-                const edgeLaneCenter = (CONFIG.lanes.mainHalf + CONFIG.lanes.edgeOuter) / 2;
-                const safeLeftX = -edgeLaneCenter;
-                const safeRightX = edgeLaneCenter;
-
-                if (spawnSide === 'left') {
-                    // Spawn Upgrade
-                    // Filter out Speed if already taken this wave
-                    const available = UPGRADE_POOL.filter(u => u.id !== 'mov' || game.speedUpsWave < 1);
-
-                    if (available.length > 0) {
-                        const idx = Math.floor(Math.random() * available.length);
-                        const upgrade = available[idx];
-                        game.pickups.push(new Pickup(safeLeftX, 50, 1, 'upgrade', upgrade));
-                    }
-
-                    // Debug Visual
-                    // this.addNotification("LEFT LOOT", "#00ff00");
-                } else if (spawnSide === 'right') {
-                    // Spawn Ally
-                    const ms = UPGRADE_POOL.find(u => u.id === 'cnt');
-                    let p = new Pickup(safeRightX, 50, 1, 'upgrade', ms);
-                    p.color = '#00ffff';
-                    game.pickups.push(p);
-
-                    // Debug Visual
-                    // this.addNotification("RIGHT ALLY", "#00ffff");
-                }
-
-                this.sideLaneTimer = 2.0; // Spawn every 2 seconds roughly
-            }
-        }
-
-        // Heart Spawner (Every 20s) - Left Lane
-        this.heartSpawnTimer -= deltaTime;
-        if (this.heartSpawnTimer <= 0) {
-            // Spawn Heart in center of left edge lane
-            const healUp = UPGRADE_POOL.find(u => u.id === 'hp');
-            const edgeLaneCenter = (CONFIG.lanes.mainHalf + CONFIG.lanes.edgeOuter) / 2;
-            game.pickups.push(new Pickup(-edgeLaneCenter, 50, 1, 'upgrade', healUp));
-            this.addNotification("HEART SPAWNED!", "#ff0066");
-
-            this.heartSpawnTimer = 20;
+        // Ally Ships - Right Lane (spawn periodically)
+        this.allySpawnTimer -= deltaTime;
+        if (this.allySpawnTimer <= 0) {
+            const mainHalf = CONFIG.lanes.mainHalf;
+            const edgeWidth = CONFIG.lanes.edgeWidth;
+            const edgeLaneCenter = mainHalf + (edgeWidth / 2);
+            const safeRightX = edgeLaneCenter;
+            
+            // Occasionally spawn strong ally (10% chance)
+            const isStrong = Math.random() < 0.1;
+            game.pickups.push(new Pickup(safeRightX, -50, 1, isStrong ? 'strong_ally' : 'ally', null));
+            
+            this.allySpawnTimer = 8 + (Math.random() * 4); // 8-12 seconds
         }
 
         this.player.update(deltaTime);
@@ -1305,52 +1445,45 @@ const Game = {
             if (this.shake < 0.5) this.shake = 0;
         }
 
-        // Draw Lane Borders (Optional visual guide)
-        const laneWidth = Math.min(canvas.width, CONFIG.laneWidth);
-        const laneLeft = centerX - laneWidth / 2;
-        const laneRight = centerX + laneWidth / 2;
+        // Draw Lane Borders - Always 3-lane mode
+        const mainHalf = CONFIG.lanes.mainHalf;
+        const edgeWidth = CONFIG.lanes.edgeWidth;
 
         ctx.strokeStyle = '#ffffff10';
         ctx.lineWidth = 2;
+        
+        // Left edge lane boundaries
         ctx.beginPath();
-        ctx.moveTo(laneLeft, 0);
-        ctx.lineTo(laneLeft, canvas.height);
-        ctx.moveTo(laneRight, 0);
-        ctx.lineTo(laneRight, canvas.height);
+        ctx.moveTo(centerX - mainHalf - edgeWidth, 0);
+        ctx.lineTo(centerX - mainHalf - edgeWidth, canvas.height);
+        ctx.moveTo(centerX - mainHalf, 0);
+        ctx.lineTo(centerX - mainHalf, canvas.height);
         ctx.stroke();
 
-        // Draw Extra Lane Dividers (Edge lanes for power-ups)
-        if (gameMode >= 1) {
-            // Left inner divider (main lane boundary)
-            ctx.beginPath();
-            ctx.moveTo(centerX - CONFIG.lanes.mainHalf, 0);
-            ctx.lineTo(centerX - CONFIG.lanes.mainHalf, canvas.height);
-            ctx.stroke();
-
-            // Outer Left (edge lane boundary)
-            ctx.beginPath();
-            ctx.moveTo(centerX - CONFIG.lanes.edgeOuter, 0);
-            ctx.lineTo(centerX - CONFIG.lanes.edgeOuter, canvas.height);
-            ctx.stroke();
-        }
-        if (gameMode === 2) {
-            // Right inner divider (main lane boundary)
-            ctx.beginPath();
-            ctx.moveTo(centerX + CONFIG.lanes.mainHalf, 0);
-            ctx.lineTo(centerX + CONFIG.lanes.mainHalf, canvas.height);
-            ctx.stroke();
-
-            // Outer Right (edge lane boundary)
-            ctx.beginPath();
-            ctx.moveTo(centerX + CONFIG.lanes.edgeOuter, 0);
-            ctx.lineTo(centerX + CONFIG.lanes.edgeOuter, canvas.height);
-            ctx.stroke();
-        }
-        ctx.lineTo(laneRight, canvas.height);
+        // Right edge lane boundaries
+        ctx.beginPath();
+        ctx.moveTo(centerX + mainHalf, 0);
+        ctx.lineTo(centerX + mainHalf, canvas.height);
+        ctx.moveTo(centerX + mainHalf + edgeWidth, 0);
+        ctx.lineTo(centerX + mainHalf + edgeWidth, canvas.height);
         ctx.stroke();
+
+        // Draw column dividers in main lane (optional visual guide)
+        const columnWidth = CONFIG.lanes.columnWidth;
+        const numColumns = CONFIG.lanes.actualColumns || Math.floor((mainHalf * 2) / columnWidth);
+        ctx.strokeStyle = '#ffffff05';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < numColumns; i++) {
+            const x = centerX - mainHalf + (i * columnWidth);
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
 
         this.pickups.forEach(p => p.draw(ctx));
         this.enemies.forEach(e => e.draw(ctx)); // Draw enemies under player
+        this.player.allies.forEach(a => a.draw(ctx)); // Draw allies
         this.player.draw(ctx);
         this.projectiles.forEach(p => p.draw(ctx));
         this.particles.forEach(p => p.draw(ctx));
