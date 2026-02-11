@@ -16,6 +16,7 @@ const CONFIG = {
         enemyBasic: '#ff2a6d',
         enemyFast: '#bd00ff',
         enemyTank: '#ff8800',
+        enemyBoss: '#ff0000',
         xp: '#05ffa1',
         text: '#ffffff',
         upgrade: '#00ff00',
@@ -484,6 +485,39 @@ class Projectile {
             ctx.beginPath();
             ctx.arc(screenX, this.y, megaRadius * 0.6, 0, Math.PI * 2);
             ctx.fill();
+        } else if (this.pierce > 1) {
+            // Piercing bullets: Blue/cyan color with electric effect
+            const pierceRadius = this.radius * 1.3;
+            const pierceColor = '#00ffff'; // Cyan
+            
+            // Outer glow with pulsing effect
+            const pulse = 1 + (Math.sin(gameTime * 10 + this.x * 0.1) * 0.2);
+            ctx.shadowBlur = 15 * pulse;
+            ctx.shadowColor = pierceColor;
+            ctx.fillStyle = pierceColor;
+            ctx.beginPath();
+            ctx.arc(screenX, this.y, pierceRadius * pulse, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner bright white core
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(screenX, this.y, pierceRadius * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Add small electric sparks around it
+            ctx.strokeStyle = '#88ffff';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 3; i++) {
+                const angle = (gameTime * 5 + i * Math.PI * 2 / 3) % (Math.PI * 2);
+                const sparkX = screenX + Math.cos(angle) * pierceRadius * 1.2;
+                const sparkY = this.y + Math.sin(angle) * pierceRadius * 1.2;
+                ctx.beginPath();
+                ctx.moveTo(screenX, this.y);
+                ctx.lineTo(sparkX, sparkY);
+                ctx.stroke();
+            }
         } else {
             // Normal bullets
             ctx.fillStyle = CONFIG.colors.bullet;
@@ -529,6 +563,15 @@ class Enemy {
             this.radius = 25;
             this.xpValue = 50;
             this.icon = '👹';
+        } else if (type === 'boss') {
+            // Boss: 5x size, 5x base HP but with reduced time scaling to keep it killable
+            // Formula: 5x tank base HP, but only 2x time scaling to prevent it from becoming unkillable
+            this.hp = ((500 + (gameTime * 10.0)) * hpMult) / 2; // 5x tank base, 2x time scaling
+            this.speed = 30; // Slower than tank
+            this.color = CONFIG.colors.enemyBoss;
+            this.radius = 125; // 5x tank radius (25 * 5)
+            this.xpValue = 250; // 5x tank XP value
+            this.icon = '👑';
         } else { // Basic
             this.hp = ((20 + (gameTime * 2.0)) * hpMult) / 2; // Half health
             this.speed = 80;
@@ -565,12 +608,21 @@ class Enemy {
         killCount++;
 
         AudioFX.explode(); // Sound
-        game.spawnExplosion(this.x, this.y, this.color, 20, 300); // Massive visual
+        
+        // Boss gets bigger explosion
+        const explosionCount = this.type === 'boss' ? 50 : 20;
+        const explosionSpeed = this.type === 'boss' ? 500 : 300;
+        game.spawnExplosion(this.x, this.y, this.color, explosionCount, explosionSpeed);
 
-        // Drop Chance Logic - Always 3-lane mode: Only coins drop from enemies
-        // Upgrades spawn in side lanes instead
+        // Boss drops more coins
         const roll = Math.random();
-        if (roll < 0.20) {
+        if (this.type === 'boss') {
+            // Boss always drops coins, and more of them
+            game.pickups.push(new Pickup(this.x, this.y, 50, 'coin'));
+            if (roll < 0.5) {
+                game.pickups.push(new Pickup(this.x, this.y, 30, 'coin'));
+            }
+        } else if (roll < 0.20) {
             game.pickups.push(new Pickup(this.x, this.y, 10, 'coin'));
         }
     }
@@ -1098,9 +1150,12 @@ const UI = {
             this.elements.statBox = document.getElementById('stat-debug-box');
         }
 
+        // Update score: kills * 10 + time survived (seconds) + wave bonus
+        const calculatedScore = (killCount * 10) + Math.floor(gameTime) + (currentWave * 50);
+        
         const levelSpan = document.getElementById('level-indicator');
         if (levelSpan) {
-            levelSpan.innerText = Math.floor(p.xp);
+            levelSpan.innerText = calculatedScore;
         }
 
         this.elements.coins.textContent = coinsRun;
@@ -1458,6 +1513,17 @@ const Game = {
         // Visual Notification - Two lines for mobile portrait
         const color = waveNum % 5 === 0 ? '#ff0000' : '#bd00ff';
         this.addNotification(`WAVE ${waveNum}\nSTART!`, color, 'big');
+
+        // Spawn boss at waves that are multiples of 5
+        if (waveNum % 5 === 0 && waveNum > 0) {
+            // Spawn boss at center of main lane after a short delay
+            setTimeout(() => {
+                const boss = new Enemy('boss');
+                boss.x = 0; // Center of main lane
+                this.enemies.push(boss);
+                this.addNotification("BOSS\nINCOMING!", '#ff0000', 'big');
+            }, 1000); // 1 second delay after wave start
+        }
 
         // Calculate wave parameters - start interspersed, get denser
         const baseEnemies = 5 + (waveNum * 2); // Base count increases with wave
