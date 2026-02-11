@@ -694,11 +694,19 @@ class Pickup {
                     Game.addNotification(this.data.name, this.data.color);
                     AudioFX.powerup(); // Sound
                 } else if (this.type === 'ally' || this.type === 'strong_ally') {
-                    // Add ally ship
-                    const newAlly = new Ally(player.x, player.y, this.isStrongAlly);
-                    player.allies.push(newAlly);
-                    Game.addNotification(this.isStrongAlly ? "STRONG ALLY JOINED!" : "ALLY JOINED!", "#00ff88");
-                    AudioFX.powerup();
+                    // Add ally ship (limit to 30 allies to balance performance and progression)
+                    const MAX_ALLIES = 30;
+                    if (player.allies.length < MAX_ALLIES) {
+                        const newAlly = new Ally(player.x, player.y, this.isStrongAlly);
+                        player.allies.push(newAlly);
+                        Game.addNotification(this.isStrongAlly ? "STRONG ALLY JOINED!" : "ALLY JOINED!", "#00ff88");
+                        AudioFX.powerup();
+                    } else {
+                        // Already at max - give coins instead
+                        coinsRun += 10;
+                        Game.addNotification("MAX ALLIES!\n+10 COINS", "#00ff88");
+                        AudioFX.playTone(800, 'sine', 0.05, 0.05);
+                    }
                 } else if (this.type === 'special_weapon') {
                     // Add special weapon (temporary)
                     if (this.data && this.data.apply) {
@@ -868,11 +876,16 @@ class Ally {
         const dy = target.y - this.y;
         const angle = Math.atan2(dy, dx);
         
+        // Scale ally damage with gameTime to keep them relevant as enemies get stronger
+        // Base damage increases by 1% per 10 seconds of gameTime (capped at 2x)
+        const timeScale = Math.min(2.0, 1.0 + (gameTime * 0.001)); // 1% per 10 seconds
+        const scaledDamage = this.damage * timeScale;
+        
         if (Game && Game.projectiles) {
             Game.projectiles.push(new Projectile(
                 this.x,
                 this.y,
-                this.damage,
+                scaledDamage,
                 this.projectileSpeed,
                 1,
                 angle // Direction
