@@ -40,6 +40,90 @@ const UPGRADE_POOL = [
     { id: 'prc', name: 'PIERCE UP', icon: '🏹', color: '#ffaa00', weight: 0.5, apply: (p) => { if (p.weapons[0].pierce < 5) p.weapons[0].pierce++; } }
 ];
 
+// Special Weapons Pool - spawns in left lane every 10 seconds
+const SPECIAL_WEAPONS = [
+    {
+        name: "HOMING BULLETS",
+        icon: "🎯",
+        color: "#00ffff",
+        id: "homing",
+        apply: (p) => {
+            // Add homing property to projectiles for 15 seconds
+            if (!p.homingActive) {
+                p.homingActive = true;
+                p.activeSpecialWeapons.push({ id: "homing", expires: gameTime + 15 });
+                setTimeout(() => {
+                    p.homingActive = false;
+                    p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.id !== "homing");
+                }, 15000);
+                Game.addNotification("HOMING BULLETS!", "#00ffff");
+            }
+        }
+    },
+    {
+        name: "RAPID FIRE",
+        icon: "💥",
+        color: "#ff00ff",
+        id: "rapid",
+        apply: (p) => {
+            p.stats.fireRateMult += 1.0; // Double fire rate
+            p.activeSpecialWeapons.push({ id: "rapid", expires: gameTime + 12 });
+            setTimeout(() => {
+                p.stats.fireRateMult -= 1.0;
+                p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.id !== "rapid");
+            }, 12000);
+            Game.addNotification("RAPID FIRE!", "#ff00ff");
+        }
+    },
+    {
+        name: "MEGA DAMAGE",
+        icon: "🔥",
+        color: "#ff0000",
+        id: "mega",
+        apply: (p) => {
+            p.stats.damageMult += 1.0; // Double damage
+            p.activeSpecialWeapons.push({ id: "mega", expires: gameTime + 10 });
+            setTimeout(() => {
+                p.stats.damageMult -= 1.0;
+                p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.id !== "mega");
+            }, 10000);
+            Game.addNotification("MEGA DAMAGE!", "#ff0000");
+        }
+    },
+    {
+        name: "SPREAD SHOT",
+        icon: "🌟",
+        color: "#ffff00",
+        id: "spread",
+        apply: (p) => {
+            const oldCount = p.weapons[0].count;
+            p.weapons[0].count += 3; // Add 3 more projectiles
+            p.activeSpecialWeapons.push({ id: "spread", expires: gameTime + 15, oldCount: oldCount });
+            setTimeout(() => {
+                p.weapons[0].count = oldCount;
+                p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.id !== "spread");
+            }, 15000);
+            Game.addNotification("SPREAD SHOT!", "#ffff00");
+        }
+    },
+    {
+        name: "PIERCE SHOT",
+        icon: "⚡",
+        color: "#00ff00",
+        id: "pierce",
+        apply: (p) => {
+            const oldPierce = p.weapons[0].pierce;
+            p.weapons[0].pierce += 3; // Add 3 pierce
+            p.activeSpecialWeapons.push({ id: "pierce", expires: gameTime + 12, oldPierce: oldPierce });
+            setTimeout(() => {
+                p.weapons[0].pierce = Math.max(1, p.weapons[0].pierce - 3);
+                p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.id !== "pierce");
+            }, 12000);
+            Game.addNotification("PIERCE SHOT!", "#00ff00");
+        }
+    }
+];
+
 // --- STATE MANAGEMENT ---
 const STATE = {
     MENU: 0,
@@ -138,6 +222,9 @@ class Player {
             fireRateMult: 1,
             speedMult: 1
         };
+        
+        // Special weapon states
+        this.homingActive = false;
 
         const baseDmg = ups.damage || 0;
 
@@ -165,6 +252,7 @@ class Player {
 
         // Special Weapons (temporary power-ups)
         this.specialWeapons = [];
+        this.activeSpecialWeapons = []; // Track active special weapons with timers
 
         // Allies (companion ships)
         this.allies = [];
@@ -215,13 +303,23 @@ class Player {
         let startX = this.x - (totalWidth / 2);
 
         for (let i = 0; i < weapon.count; i++) {
-            game.projectiles.push(new Projectile(
+            const proj = new Projectile(
                 startX + (i * offsetStep),
                 this.y - 20,
                 weapon.damage * this.stats.damageMult,
                 weapon.projectileSpeed,
                 weapon.pierce
-            ));
+            );
+            // Add homing property if active
+            if (this.homingActive) {
+                proj.isHoming = true;
+            }
+            // Check if Mega Damage is active
+            const hasMega = this.activeSpecialWeapons.some(sw => sw.id === "mega");
+            if (hasMega) {
+                proj.isMega = true;
+            }
+            game.projectiles.push(proj);
         }
     }
 
@@ -306,9 +404,53 @@ class Projectile {
         this.radius = 4;
         this.markedForDeletion = false;
         this.hitList = []; // Enemies already hit
+        this.isHoming = false; // Homing bullets
+        this.homingTarget = null;
     }
 
     update(dt) {
+        // Homing logic
+        if (this.isHoming && !this.homingTarget) {
+            // Find nearest enemy
+            let nearest = null;
+            let minDist = Infinity;
+            
+            if (Game && Game.enemies) {
+                Game.enemies.forEach(e => {
+                    const dx = e.x - this.x;
+                    const dy = e.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < minDist && dist < 600) { // Max homing range
+                        minDist = dist;
+                        nearest = e;
+                    }
+                });
+            }
+            
+            if (nearest) {
+                this.homingTarget = nearest;
+            }
+        }
+        
+        // Update homing target angle
+        if (this.isHoming && this.homingTarget && !this.homingTarget.markedForDeletion) {
+            const dx = this.homingTarget.x - this.x;
+            const dy = this.homingTarget.y - this.y;
+            const targetAngle = Math.atan2(dy, dx);
+            
+            // Smoothly rotate towards target (homing strength)
+            const turnSpeed = 8.0; // How fast it turns
+            let angleDiff = targetAngle - this.angle;
+            
+            // Normalize angle difference
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            
+            this.angle += angleDiff * turnSpeed * dt;
+        } else if (this.isHoming && this.homingTarget && this.homingTarget.markedForDeletion) {
+            this.homingTarget = null; // Target destroyed, find new one
+        }
+        
         // Move in direction
         this.x += Math.cos(this.angle) * this.speed * dt;
         this.y += Math.sin(this.angle) * this.speed * dt;
@@ -322,13 +464,36 @@ class Projectile {
 
     draw(ctx) {
         const screenX = centerX + this.x;
-        ctx.fillStyle = CONFIG.colors.bullet;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = CONFIG.colors.bullet;
-        ctx.beginPath();
-        ctx.arc(screenX, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        
+        if (this.isMega) {
+            // Mega bullets: Larger, red/orange color, more glow
+            const megaRadius = this.radius * 1.8;
+            const megaColor = '#ff4400'; // Red-orange
+            
+            // Outer glow
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = megaColor;
+            ctx.fillStyle = megaColor;
+            ctx.beginPath();
+            ctx.arc(screenX, this.y, megaRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner bright core
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ffaa00';
+            ctx.beginPath();
+            ctx.arc(screenX, this.y, megaRadius * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Normal bullets
+            ctx.fillStyle = CONFIG.colors.bullet;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = CONFIG.colors.bullet;
+            ctx.beginPath();
+            ctx.arc(screenX, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
     }
 }
 
@@ -563,12 +728,12 @@ class Pickup {
             ctx.scale(pulse, pulse);
             
             ctx.shadowBlur = 25;
-            ctx.shadowColor = this.color;
+            ctx.shadowColor = this.data ? this.data.color : this.color;
             
             ctx.font = `${size}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('⚡', 0, 0);
+            ctx.fillText(this.data ? this.data.icon : '⚡', 0, 0);
             
             ctx.shadowBlur = 0;
             ctx.scale(1 / pulse, 1 / pulse);
@@ -856,7 +1021,6 @@ const UI = {
 
     elements: {
         hpBar: document.getElementById('hp-bar-fill'),
-        xpBar: document.getElementById('xp-bar-fill'),
         lvlText: document.getElementById('level-indicator'),
         timer: document.getElementById('timer'),
         coins: document.getElementById('game-coins'),
@@ -877,19 +1041,58 @@ const UI = {
         const hpPct = (p.hp / p.maxHp) * 100;
         this.elements.hpBar.style.width = `${hpPct}%`;
 
-        const statText = `LEVEL: ${game.wave}
-❤️ ${lives}
-____________
-⚔️ ${(15 * p.stats.damageMult).toFixed(1)}
-⏩ ${(150 * p.stats.speedMult).toFixed(0)}
-🔥 x${p.stats.fireRateMult.toFixed(2)}
-✨ ${p.weapons[0].count}
-🏹 ${p.weapons[0].pierce}`;
+        // Build active special weapons list from tracked active weapons
+        let activeSpecials = [];
+        // Clean up expired special weapons
+        p.activeSpecialWeapons = p.activeSpecialWeapons.filter(sw => sw.expires > gameTime);
+        
+        // Map active special weapons to display
+        const specialMap = {
+            "homing": "🎯 HOMING",
+            "rapid": "💥 RAPID FIRE",
+            "mega": "🔥 MEGA DMG",
+            "spread": "🌟 SPREAD SHOT",
+            "pierce": "⚡ PIERCE SHOT"
+        };
+        
+        p.activeSpecialWeapons.forEach(sw => {
+            if (specialMap[sw.id]) {
+                activeSpecials.push(specialMap[sw.id]);
+            }
+        });
+        
+        const baseDmg = 15;
 
-        // Update stats box using cached element
+        const currentWave = (game && game.currentWave !== undefined) ? game.currentWave : 0;
+        
+        // Update wave display at top
+        const waveDisplay = document.getElementById('wave-display');
+        if (waveDisplay) {
+            waveDisplay.textContent = `WAVE ${currentWave}`;
+        }
+        
+        // Build 1-row layout: All stats + special weapons in single row
+        const statsPart = `❤️ ${lives} | 👥 ${p.allies.length} | ⚔️ ${(baseDmg * p.stats.damageMult).toFixed(1)} | 🔥 x${p.stats.fireRateMult.toFixed(2)} | ✨ ${p.weapons[0].count} | 🏹 ${p.weapons[0].pierce}`;
+        let specialsPart = '';
+        if (activeSpecials.length > 0) {
+            // Wrap special weapons in spans with class for styling
+            const specialsHtml = activeSpecials.map(s => `<span class="special-weapon">${s}</span>`).join(' | ');
+            specialsPart = ` | ${specialsHtml}`;
+        }
+        const singleRow = statsPart + specialsPart;
+
+        // Update stats box using cached element - 1-row layout, full lane width
         if (this.elements.statBox) {
-            this.elements.statBox.textContent = statText;
-            this.elements.statBox.style.whiteSpace = 'pre-line'; // Ensure line breaks
+            // Create 1-row layout
+            this.elements.statBox.innerHTML = `<div class="stat-row">${singleRow}</div>`;
+            
+            // Set width to full lane width (main lane + edge lanes)
+            const mainLaneWidth = (CONFIG.lanes.mainHalf * 2) + (CONFIG.lanes.edgeWidth * 2);
+            const fullLaneWidth = Math.min(mainLaneWidth + 20, window.innerWidth - 20); // Lane width + small padding
+            this.elements.statBox.style.width = `${fullLaneWidth}px`;
+            this.elements.statBox.style.maxWidth = `${fullLaneWidth}px`;
+            this.elements.statBox.style.left = '50%';
+            this.elements.statBox.style.transform = 'translateX(-50%)';
         } else {
             // Retry fetch if missed (racing condition safe)
             this.elements.statBox = document.getElementById('stat-debug-box');
@@ -897,7 +1100,7 @@ ____________
 
         const levelSpan = document.getElementById('level-indicator');
         if (levelSpan) {
-            levelSpan.innerText = `SCORE: ${Math.floor(p.xp)}`;
+            levelSpan.innerText = Math.floor(p.xp);
         }
 
         this.elements.coins.textContent = coinsRun;
@@ -1252,9 +1455,9 @@ const Game = {
         this.isWaveActive = true;
         this.currentWave = waveNum;
         
-        // Visual Notification
+        // Visual Notification - Two lines for mobile portrait
         const color = waveNum % 5 === 0 ? '#ff0000' : '#bd00ff';
-        this.addNotification(`WAVE ${waveNum} START!`, color, 'big');
+        this.addNotification(`WAVE ${waveNum}\nSTART!`, color, 'big');
 
         // Calculate wave parameters - start interspersed, get denser
         const baseEnemies = 5 + (waveNum * 2); // Base count increases with wave
@@ -1290,7 +1493,7 @@ const Game = {
         setTimeout(() => {
             this.isWaveActive = false;
             this.waveBreakTimer = 5; // 5 second break between waves
-            this.addNotification(`WAVE ${waveNum} COMPLETE!`, '#00ff00', 'big');
+            this.addNotification(`WAVE ${waveNum}\nCOMPLETE!`, '#00ff00', 'big');
         }, waveDuration * 1000);
     },
 
@@ -1328,19 +1531,10 @@ const Game = {
             const edgeLaneCenter = mainHalf + (edgeWidth / 2);
             const safeLeftX = -edgeLaneCenter;
             
-            // Create special weapon pickup
-            const specialWeapon = {
-                name: "SPECIAL WEAPON",
-                apply: (p) => {
-                    // Temporary damage boost or special effect
-                    p.stats.damageMult += 0.5;
-                    setTimeout(() => {
-                        p.stats.damageMult -= 0.5;
-                    }, 10000); // 10 second duration
-                }
-            };
+            // Randomly select a special weapon
+            const randomWeapon = SPECIAL_WEAPONS[Math.floor(Math.random() * SPECIAL_WEAPONS.length)];
             
-            game.pickups.push(new Pickup(safeLeftX, -50, 1, 'special_weapon', specialWeapon));
+            game.pickups.push(new Pickup(safeLeftX, -50, 1, 'special_weapon', randomWeapon));
             this.specialWeaponTimer = 10; // Every 10 seconds
         }
 
@@ -1494,9 +1688,11 @@ const Game = {
             let screenX = centerX + n.x;
             let screenY = n.y;
             let font = 'bold 20px "Orbitron", sans-serif';
+            let lineHeight = 25;
 
             if (n.size === 'big') {
-                font = 'bold 60px "Orbitron", sans-serif';
+                font = 'bold 50px "Orbitron", sans-serif'; // Slightly smaller for mobile
+                lineHeight = 60;
                 screenX = centerX; // Absolute center
                 screenY = canvas.height * 0.3; // Fixed top-ish position
             }
@@ -1507,7 +1703,13 @@ const Game = {
             ctx.shadowColor = n.color;
             // Fade out
             ctx.globalAlpha = Math.min(1, n.life);
-            ctx.fillText(n.text, screenX, screenY);
+            
+            // Support multi-line text (split by \n)
+            const lines = n.text.split('\n');
+            lines.forEach((line, index) => {
+                ctx.fillText(line, screenX, screenY + (index * lineHeight));
+            });
+            
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
         });

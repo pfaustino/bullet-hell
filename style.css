@@ -187,22 +187,42 @@ button:active {
 
 .stats-box {
     position: absolute;
-    top: 100px;
-    left: 10px;
+    bottom: 0; /* At the very bottom, below coins/score bar */
+    left: 50%;
+    transform: translateX(-50%); /* Center horizontally */
     background: rgba(0, 0, 0, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.3);
     color: #00ff00;
     font-family: 'Orbitron', monospace;
-    font-size: 12px;
-    padding: 10px;
-    border-radius: 4px;
+    font-size: 11px; /* Increased by 2px from 9px */
+    padding: 4px 8px; /* Reduced vertical padding for single row */
+    border-radius: 4px 4px 0 0; /* Rounded top corners only */
     pointer-events: none;
-    line-height: 1.5;
-    white-space: pre;
+    line-height: 1.2; /* Tighter line height for single row */
     z-index: 20;
     height: auto;
-    /* Ensure it grows */
-    min-width: 100px;
+    width: auto; /* Will be set dynamically to lane width */
+    display: flex;
+    flex-direction: column;
+    gap: 0; /* No gap needed for single row */
+}
+
+.stat-row {
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Special weapons within the same row will use inline styling */
+.stat-row .special-weapon {
+    color: #ffaa00; /* Orange color for special weapons in the row */
+}
+
+.wave-display {
+    color: #ff00ff;
+    font-weight: bold;
+    font-size: 14px;
+    margin-right: 10px;
+    font-family: 'Orbitron', monospace;
 }
 
 .top-bar,
@@ -223,6 +243,11 @@ button:active {
 
 .bottom-bar {
     bottom: 0;
+    margin-bottom: 0; /* Will be positioned above stats box */
+}
+
+#hud .bottom-bar {
+    bottom: 30px !important; /* Position above stats box (stats box is now single row, ~25px tall) */
 }
 
 .bar-container {
@@ -263,8 +288,12 @@ button:active {
 }
 
 .score-container {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
     font-family: var(--font-head);
+    flex-wrap: wrap;
 }
 
 #timer {
@@ -557,13 +586,23 @@ button:active {
     }
 
     #hud .bottom-bar {
-        flex-direction: column;
-        gap: 0.5rem;
-        align-items: flex-start;
+        flex-direction: row;
+        gap: 1rem;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.8rem;
+        bottom: 28px !important; /* Above stats box on mobile (single row, ~25px tall) */
     }
 
     #hud .coin-display {
-        margin-left: auto;
+        margin-left: 0;
+    }
+    
+    .stats-box {
+        font-size: 10px; /* Increased by 2px from 8px */
+        padding: 4px 6px;
+        bottom: 0; /* At very bottom on mobile */
+        gap: 2px;
     }
 
     /* Settings sliders larger */
