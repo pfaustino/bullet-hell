@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "smoke": "node scripts/smoke-check.mjs",
     "check": "npm run smoke",
+    "verify:leaderboard": "node scripts/verify-leaderboard-key.mjs",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
