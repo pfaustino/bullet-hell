@@ -13,6 +13,11 @@ test.describe('global leaderboard', () => {
     await expect(modal).toBeVisible();
     await expect(modal).toHaveClass(/active/);
 
+    // The board actually renders into the modal's list (rows or empty state)
+    // — it must NOT stay stuck on the "Loading leaderboard…" placeholder.
+    await expect(page.locator('#lb-modal-list .leaderboard-row, #lb-modal-list .leaderboard-placeholder').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#lb-modal-list')).not.toContainText('Loading leaderboard');
+
     // CLOSE returns to the menu
     await page.locator('#lb-close').click();
     await expect(modal).toHaveClass(/hidden/);

@@ -302,7 +302,11 @@ const LEADERBOARD = {
 
     // Fetch + render the board into the modal. Called from game-over too.
     async show() {
-        const listEl = document.getElementById('lb-list');
+        // The full-screen modal has its own list element (`lb-modal-list`);
+        // the game-over panel uses `lb-list`. Render into whichever is visible.
+        const modalEl = document.getElementById('leaderboard-modal');
+        const modalActive = modalEl && modalEl.classList.contains('active');
+        const listEl = document.getElementById(modalActive ? 'lb-modal-list' : 'lb-list');
         if (!listEl) return;
         this.setStatus('');
 
