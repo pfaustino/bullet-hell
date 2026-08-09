@@ -597,6 +597,122 @@ button:active {
     white-space: nowrap;
 }
 
+/* Leaderboard modal tabs + local panel + name row + name prompt */
+.leaderboard-tabs {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+
+.leaderboard-tab {
+    padding: 0.5rem 1.4rem;
+    font-family: var(--font-head);
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+
+.leaderboard-tab.is-active {
+    color: var(--text);
+    border-color: var(--primary);
+    background: rgba(255, 0, 102, 0.15);
+    box-shadow: 0 0 8px var(--primary-dim);
+}
+
+.leaderboard-name-row {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 460px;
+    margin: 0 auto 1rem;
+}
+
+.leaderboard-name-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    outline: none;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.leaderboard-panel-tab {
+    width: 100%;
+    max-width: 460px;
+    margin: 0 auto 1rem;
+}
+
+.leaderboard-sub {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+}
+
+.leaderboard-bests {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.leaderboard-stat {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 0.6rem 0.4rem;
+    text-align: center;
+}
+
+.leaderboard-stat span {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.leaderboard-stat strong {
+    font-family: var(--font-head);
+    font-size: 1.1rem;
+    color: var(--primary);
+}
+
+.leaderboard-row.is-best {
+    background: rgba(255, 0, 102, 0.1);
+    border-radius: 4px;
+}
+
+.lb-pr {
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 1px solid var(--primary);
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    margin-left: 0.25rem;
+}
+
+.leaderboard-section-title {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+    margin: 1rem 0 0.5rem;
+}
+
+
 /* Animations */
 @keyframes pulse {
     0% {

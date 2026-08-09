@@ -171,16 +171,48 @@
             </div>
         </div>
 
-        <!-- Global Leaderboard Modal (full screen, opened from menu/pause) -->
+                <!-- Leaderboard Modal (full screen, opened from menu/pause): Local (this device) + Global tabs -->
         <div id="leaderboard-modal" class="screen hidden overlay glass-panel">
-            <h2>GLOBAL LEADERBOARD</h2>
-            <div id="lb-modal-list" class="leaderboard-list">
-                <p class="leaderboard-placeholder">Loading leaderboard&hellip;</p>
+            <h2>🏆 LEADERBOARD</h2>
+            <div class="leaderboard-tabs">
+                <button type="button" class="leaderboard-tab is-active" data-tab="local">Local</button>
+                <button type="button" class="leaderboard-tab" data-tab="global">Global</button>
+            </div>
+            <div class="leaderboard-name-row">
+                <input id="lb-modal-name" type="text" maxlength="24" placeholder="Your name for Global board"
+                    autocomplete="off" spellcheck="false" />
+                <button id="lb-modal-save-name" class="secondary-btn">Save</button>
+            </div>
+            <div id="lb-panel-local" class="leaderboard-panel-tab">
+                <p class="leaderboard-placeholder">No runs yet — play a round to set your first record!</p>
+            </div>
+            <div id="lb-panel-global" class="leaderboard-panel-tab hidden">
+                <p class="leaderboard-sub">Top survival runs worldwide</p>
+                <div id="lb-modal-list" class="leaderboard-list">
+                    <p class="leaderboard-placeholder">Loading leaderboard&hellip;</p>
+                </div>
             </div>
             <div class="menu-buttons">
                 <button id="lb-close" class="secondary-btn">CLOSE</button>
             </div>
         </div>
+
+        <!-- Name prompt (shown when quitting mid-run without a saved name) -->
+        <div id="name-prompt" class="screen hidden overlay glass-panel">
+            <h2>SAVE YOUR RUN?</h2>
+            <p class="leaderboard-sub">Your run was recorded on this device. Enter a name to submit it to the Global leaderboard:</p>
+            <div class="leaderboard-name-row">
+                <input id="np-name" type="text" maxlength="24" placeholder="Your name" autocomplete="off" spellcheck="false" />
+                <button id="np-submit" class="primary-btn">Submit</button>
+            </div>
+            <div class="menu-buttons">
+                <button id="np-skip" class="secondary-btn">Skip</button>
+            </div>
+        </div>
+
+
+
+
 
     </div>
 

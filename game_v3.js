@@ -227,6 +227,8 @@ const LEADERBOARD = {
         const savedName = this.getSavedName();
         const input = document.getElementById('lb-name');
         if (input && savedName) input.value = savedName;
+        const modalName = document.getElementById('lb-modal-name');
+        if (modalName && savedName) modalName.value = savedName;
 
         // Bind the submit button on the game-over board
         const submitBtn = document.getElementById('lb-submit');
@@ -242,6 +244,44 @@ const LEADERBOARD = {
         const overlay = document.getElementById('leaderboard-modal');
         if (overlay) overlay.addEventListener('click', (e) => {
             if (e.target === overlay) this.close(); // click outside closes
+        });
+
+        // Bind Local/Global tab switching in the modal
+        document.querySelectorAll('.leaderboard-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.leaderboard-tab').forEach((t) => t.classList.toggle('is-active', t === tab));
+                const isLocal = tab.dataset.tab === 'local';
+                const localPanel = document.getElementById('lb-panel-local');
+                const globalPanel = document.getElementById('lb-panel-global');
+                if (localPanel) localPanel.classList.toggle('hidden', !isLocal);
+                if (globalPanel) globalPanel.classList.toggle('hidden', isLocal);
+                if (isLocal) {
+                    if (localPanel) this.renderLocalPanel(localPanel);
+                } else {
+                    const listEl = document.getElementById('lb-modal-list');
+                    if (listEl) this.renderGlobal(listEl);
+                }
+            });
+        });
+
+        // Bind the modal's name Save (GigaZonk-style persistent global name)
+        const saveNameBtn = document.getElementById('lb-modal-save-name');
+        if (saveNameBtn) saveNameBtn.addEventListener('click', () => {
+            const nameInput = document.getElementById('lb-modal-name');
+            if (!nameInput) return;
+            const name = this.validateName(nameInput.value);
+            if (!name) {
+                nameInput.style.outline = '1px solid var(--danger)';
+                setTimeout(() => { nameInput.style.outline = ''; }, 1200);
+                return;
+            }
+            this.setSavedName(name);
+            const savedStatus = document.getElementById('lb-status');
+            if (savedStatus) {
+                savedStatus.classList.remove('hidden', 'error');
+                savedStatus.textContent = 'Global name saved (' + name + ')';
+                setTimeout(() => { savedStatus.classList.add('hidden'); }, 2500);
+            }
         });
     },
 
@@ -300,16 +340,34 @@ const LEADERBOARD = {
         modal.classList.add('hidden');
     },
 
-    // Fetch + render the board into the modal. Called from game-over too.
+    // Render whichever view is visible: game-over global list, or the modal's
+    // active tab (Local = this device, Global = the shared API board).
     async show() {
-        // The full-screen modal has its own list element (`lb-modal-list`);
-        // the game-over panel uses `lb-list`. Render into whichever is visible.
+        this.setStatus('');
         const modalEl = document.getElementById('leaderboard-modal');
         const modalActive = modalEl && modalEl.classList.contains('active');
-        const listEl = document.getElementById(modalActive ? 'lb-modal-list' : 'lb-list');
-        if (!listEl) return;
-        this.setStatus('');
+        if (!modalActive) {
+            // Game-over panel -> global board into #lb-list
+            const listEl = document.getElementById('lb-list');
+            if (!listEl) return;
+            this.renderGlobal(listEl);
+            return;
+        }
+        // Modal: render the active tab
+        const activeTabBtn = document.querySelector('.leaderboard-tab.is-active');
+        const activeTab = activeTabBtn ? activeTabBtn.dataset.tab : 'global';
+        if (activeTab === 'local') {
+            const panel = document.getElementById('lb-panel-local');
+            if (panel) this.renderLocalPanel(panel);
+        } else {
+            const listEl = document.getElementById('lb-modal-list');
+            if (listEl) await this.renderGlobal(listEl);
+        }
+    },
 
+    // Fetch + render the global board into the given list element.
+    async renderGlobal(listEl) {
+        if (!listEl) return;
         // If no write key, prefer the saved local snapshot (offline/dev).
         if (!this.isConfigured()) {
             const best = this.getBest();
@@ -343,6 +401,97 @@ const LEADERBOARD = {
                 this.renderEmpty(listEl);
             }
         }
+    },
+
+    // --- Local (this-device) leaderboard panel ---
+    RUNS_KEY: 'bulletHellRuns', // every run on this device, newest last
+
+    getRuns() {
+        try {
+            const raw = localStorage.getItem(this.RUNS_KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr : [];
+        } catch { return []; }
+    },
+
+    addRun(run) {
+        if (!run || typeof run.score !== 'number') return;
+        const runs = this.getRuns();
+        runs.push({
+            score: Math.floor(run.score),
+            wave: Math.floor(run.wave || 0),
+            time: Math.floor(run.time || 0),
+            kills: Math.floor(run.kills || 0),
+            coins: Math.floor(run.coins || 0),
+            difficulty: Math.floor(run.difficulty || 1),
+            at: Date.now()
+        });
+        try { localStorage.setItem(this.RUNS_KEY, JSON.stringify(runs.slice(-200))); } catch (e) { /* ignore */ }
+    },
+
+    // Best-run snapshot (single best, used for offline fallback + submit).
+    saveRunSnapshot(run) {
+        if (!run || typeof run.score !== 'number') return;
+        const prev = this.getBestFromStorage();
+        if (prev && prev.score > run.score) return; // keep the better one
+        const best = {
+            score: Math.floor(run.score),
+            meta: {
+                time: Math.floor(run.time || 0),
+                kills: Math.floor(run.kills || 0),
+                wave: Math.floor(run.wave || 0),
+                coins: Math.floor(run.coins || 0),
+                difficulty: Math.floor(run.difficulty || 1)
+            },
+            name: run.name || ''
+        };
+        try { localStorage.setItem(this.SAVE_KEY, JSON.stringify(best)); } catch (e) { /* ignore */ }
+    },
+
+    formatDate(ts) {
+        if (!ts) return '—';
+        try {
+            return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        } catch { return '—'; }
+    },
+
+    // GigaZonk-style local panel: summary stats + recent runs table.
+    renderLocalPanel(panel) {
+        if (!panel) return;
+        const runs = this.getRuns();
+        if (!runs.length) {
+            panel.innerHTML = '<p class="leaderboard-placeholder">No runs yet — play a round to set your first record!</p>';
+            return;
+        }
+        const sorted = [...runs].sort((a, b) => b.score - a.score);
+        const best = sorted[0];
+        const totalKills = runs.reduce((s, r) => s + (r.kills || 0), 0);
+        const bestWave = sorted.reduce((m, r) => Math.max(m, r.wave || 0), 0);
+        panel.innerHTML =
+            '<p class="leaderboard-sub">Best runs on this device · ' + runs.length + ' recorded</p>' +
+            '<div class="leaderboard-bests">' +
+            '<div class="leaderboard-stat"><span>Best wave</span><strong>W' + (bestWave || 0) + '</strong></div>' +
+            '<div class="leaderboard-stat"><span>Best time</span><strong>' + this.formatTime(best.time) + '</strong></div>' +
+            '<div class="leaderboard-stat"><span>Best kills</span><strong>' + (best.kills || 0) + '</strong></div>' +
+            '<div class="leaderboard-stat"><span>Total kills</span><strong>' + totalKills + '</strong></div>' +
+            '</div>' +
+            '<h3 class="leaderboard-section-title">Top runs by score</h3>' +
+            this.buildLocalRunRows(sorted);
+    },
+
+    buildLocalRunRows(runs) {
+        const sorted = [...runs].sort((a, b) => b.score - a.score);
+        const bestScore = sorted[0]?.score;
+        const rows = sorted.map((run, i) => {
+            const isBest = run.score === bestScore && run.score > 0;
+            return '<div class="leaderboard-row' + (isBest ? ' is-best' : '') + '">' +
+                '<span class="lb-rank">' + (i + 1) + '</span>' +
+                '<span class="lb-name">W' + (run.wave || 0) + (isBest ? ' <span class="lb-pr">PR</span>' : '') + '</span>' +
+                '<span class="lb-meta">' + this.formatTime(run.time) + ' · ' + (run.kills || 0) + ' kills</span>' +
+                '<span class="lb-value">' + this.formatDate(run.at) + '</span>' +
+                '</div>';
+        }).join('');
+        return '<div class="leaderboard-list">' + rows + '</div>';
     },
 
     renderRows(listEl, rows) {
@@ -405,23 +554,59 @@ const LEADERBOARD = {
         }
     },
 
-    // Keep the highest-scoring run on this device (works even if API is offline).
-    saveRunSnapshot(run) {
-        if (!run || typeof run.score !== 'number') return;
-        const prev = this.getBestFromStorage();
-        if (prev && prev.score > run.score) return; // keep the better one
-        const best = {
-            score: Math.floor(run.score),
-            meta: {
-                time: Math.floor(run.time || 0),
-                kills: Math.floor(run.kills || 0),
-                wave: Math.floor(run.wave || 0),
-                coins: Math.floor(run.coins || 0),
-                difficulty: Math.floor(run.difficulty || 1)
+    // POST a run to the Global board. Returns the response. Throws on !ok.
+    async postScore(name, score, meta) {
+        const res = await fetch(`${this.apiBase}/api/score`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Game-Key': this.writeKey
             },
-            name: run.name || ''
+            body: JSON.stringify({
+                game: this.GAME_ID,
+                player: name,
+                value: score,
+                meta: meta || {}
+            })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        return res;
+    },
+
+    // Prompt for a name to submit a run to Global (used when quitting mid-run
+    // with no saved name). The run is already recorded locally.
+    promptForName(run) {
+        const promptEl = document.getElementById('name-prompt');
+        if (!promptEl) return;
+        const nameInput = document.getElementById('np-name');
+        if (nameInput) { nameInput.value = this.getSavedName() || ''; nameInput.focus(); }
+        promptEl.classList.remove('hidden');
+        promptEl.classList.add('active');
+        const doSubmit = async () => {
+            if (!nameInput) return;
+            const name = this.validateName(nameInput.value);
+            if (!name) return; // empty/invalid -> ignore, user can Skip
+            promptEl.classList.add('hidden');
+            promptEl.classList.remove('active');
+            this.setSavedName(name);
+            try {
+                await this.postScore(name, run.score, run.meta || {});
+            } catch (e) {
+                console.warn('Quit-submit failed:', e);
+            }
         };
-        try { localStorage.setItem(this.SAVE_KEY, JSON.stringify(best)); } catch (e) { /* ignore */ }
+        const doSkip = () => {
+            promptEl.classList.add('hidden');
+            promptEl.classList.remove('active');
+        };
+        const submitBtn = document.getElementById('np-submit');
+        const skipBtn = document.getElementById('np-skip');
+        if (submitBtn) submitBtn.onclick = doSubmit;
+        if (skipBtn) skipBtn.onclick = doSkip;
+        if (nameInput) nameInput.onkeydown = (e) => { if (e.key === 'Enter') doSubmit(); };
     },
 
     // POST the completed run. Called when the player enters a name and submits.
@@ -447,23 +632,7 @@ const LEADERBOARD = {
         submitBtn.textContent = 'Submitting…';
         this.setStatus('');
         try {
-            const res = await fetch(`${this.apiBase}/api/score`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Game-Key': this.writeKey
-                },
-                body: JSON.stringify({
-                    game: this.GAME_ID,
-                    player: name,
-                    value: best.score,
-                    meta: best.meta || {}
-                })
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `HTTP ${res.status}`);
-            }
+            await this.postScore(name, best.score, best.meta || {});
             this.setSavedName(name);
             await this.show();
             this.setStatus('Score submitted! 🎉');
@@ -1749,6 +1918,7 @@ const Game = {
         lives = 10;
         coinsRun = 0;
         this.speedUpsWave = 0;
+        this.runActive = true; // a run is in progress (can be quit -> save/submit)
 
         UI.showScreen('hud');
         UI.updateHUD();
@@ -1757,6 +1927,40 @@ const Game = {
     },
 
     quitToMenu() {
+        // Save the in-progress run (Local history + best snapshot). Submit to
+        // Global automatically if we have a saved name; otherwise offer the
+        // name prompt so the run isn't lost without being asked.
+        if (this.runActive) {
+            this.runActive = false;
+            const runScore = LEADERBOARD.computeScore(this.currentWave, gameTime, killCount);
+            const meta = {
+                wave: this.currentWave,
+                time: Math.floor(gameTime),
+                kills: killCount,
+                coins: coinsRun,
+                difficulty: difficultyIndex + 1
+            };
+            const run = {
+                score: runScore,
+                wave: this.currentWave,
+                time: Math.floor(gameTime),
+                kills: killCount,
+                coins: coinsRun,
+                difficulty: difficultyIndex + 1,
+                meta,
+                name: LEADERBOARD.getSavedName()
+            };
+            LEADERBOARD.addRun(run);
+            LEADERBOARD.saveRunSnapshot(run);
+            if (LEADERBOARD.isConfigured()) {
+                if (run.name) {
+                    LEADERBOARD.postScore(run.name, run.score, meta).catch((e) =>
+                        console.warn('Quit-submit failed:', e));
+                } else {
+                    LEADERBOARD.promptForName(run);
+                }
+            }
+        }
         UI.showScreen('menu');
         currentState = STATE.MENU;
         UI.elements.menuCoins.textContent = saveData.coins;
@@ -1793,6 +1997,7 @@ const Game = {
 
     gameOver() {
         currentState = STATE.GAME_OVER;
+        this.runActive = false;
         saveData.coins += coinsRun;
         localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
 
@@ -1804,7 +2009,7 @@ const Game = {
 
         // Save best-score snapshot for leaderboard (works even if API is offline)
         const runScore = LEADERBOARD.computeScore(this.currentWave, gameTime, killCount);
-        LEADERBOARD.saveRunSnapshot({
+        const run = {
             score: runScore,
             time: Math.floor(gameTime),
             kills: killCount,
@@ -1812,7 +2017,9 @@ const Game = {
             coins: coinsRun,
             difficulty: difficultyIndex + 1,
             name: LEADERBOARD.getSavedName()
-        });
+        };
+        LEADERBOARD.addRun(run);          // Local history (every run)
+        LEADERBOARD.saveRunSnapshot(run); // best-run snapshot
 
         LEADERBOARD.show(); // fetch + render the board
     },
