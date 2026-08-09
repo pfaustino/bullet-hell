@@ -31,6 +31,7 @@
             <div class="menu-buttons">
                 <button id="btn-play" class="primary-btn">PLAY</button>
                 <button id="btn-upgrades" class="secondary-btn">UPGRADES</button>
+                <button id="btn-leaderboard-menu" class="secondary-btn">LEADERBOARD</button>
                 <button id="btn-settings" class="secondary-btn">SETTINGS</button>
             </div>
             <div class="meta-currency">
@@ -120,6 +121,7 @@
             <div class="menu-buttons">
                 <button id="btn-resume" class="primary-btn">RESUME</button>
                 <button id="btn-settings-pause" class="secondary-btn">SETTINGS</button>
+                <button id="btn-leaderboard" class="secondary-btn">LEADERBOARD</button>
 
                 <div class="difficulty-control" style="margin: 1rem 0; text-align: center;">
                     <h3>DIFFICULTY</h3>
@@ -144,14 +146,52 @@
                 <div class="stat-row"><span>Enemies Defeated:</span> <span id="go-kills">0</span></div>
                 <div class="stat-row"><span>Coins Earned:</span> <span id="go-coins">0</span></div>
             </div>
+
+            <!-- Global Leaderboard -->
+            <div class="leaderboard-panel">
+                <h2 class="leaderboard-title">GLOBAL LEADERBOARD</h2>
+
+                <!-- Submit form -->
+                <div class="leaderboard-submit">
+                    <input id="lb-name" type="text" maxlength="24" placeholder="Enter your name"
+                        autocomplete="off" spellcheck="false" />
+                    <button id="lb-submit" class="primary-btn">SUBMIT SCORE</button>
+                    <p id="lb-status" class="leaderboard-status hidden"></p>
+                </div>
+
+                <!-- Top scores list -->
+                <div id="lb-list" class="leaderboard-list">
+                    <p class="leaderboard-placeholder">Loading leaderboard&hellip;</p>
+                </div>
+            </div>
+
             <div class="menu-buttons">
                 <button id="btn-retry" class="primary-btn">RETRY</button>
                 <button id="btn-menu" class="secondary-btn">MAIN MENU</button>
             </div>
         </div>
 
+        <!-- Global Leaderboard Modal (full screen, opened from menu/pause) -->
+        <div id="leaderboard-modal" class="screen hidden overlay glass-panel">
+            <h2>GLOBAL LEADERBOARD</h2>
+            <div id="lb-list" class="leaderboard-list">
+                <p class="leaderboard-placeholder">Loading leaderboard&hellip;</p>
+            </div>
+            <div class="menu-buttons">
+                <button id="lb-close" class="secondary-btn">CLOSE</button>
+            </div>
+        </div>
+
     </div>
 
+    <script>
+        // Leaderboard env injected by Vite at build/dev time (see vite.config.js).
+        // Empty strings mean "not configured" -> leaderboard runs read-only/offline.
+        window.__LEADERBOARD_ENV__ = {
+            apiBase: __LEADERBOARD_API__,
+            writeKey: __LEADERBOARD_WRITE_KEY__
+        };
+    </script>
     <script src="dev/DevPanel.js"></script>
     <script src="game_v3.js"></script>
 </body>

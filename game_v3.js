@@ -192,6 +192,304 @@ if (localStorage.getItem('bulletHellSave')) {
     saveData = JSON.parse(JSON.stringify(defaultSave));
 }
 
+// --- GLOBAL LEADERBOARD (pfaustino/leaderboards API) ---
+// Rank ordering: Wave -> Time -> Kills (dominance-encoded into one number).
+//   composite = wave * 1_000_000_000 + timeSeconds * 10_000 + kills
+// The API sorts a single `value` DESC, so a higher wave always outranks a
+// lower one; within a wave, longer time outranks; within that, more kills.
+// Server is commit-scoped: game "bullet-hell" enabled via
+// VITE_LEADERBOARD_API + VITE_LEADERBOARD_WRITE_KEY. If unset or not
+// registered, the leaderboard is read-only/offline (local best only).
+
+// Env-provided values. The game loads as a plain script (no module transform),
+// so `import.meta.env` is NOT available — env values are injected onto
+// `window.__LEADERBOARD_ENV__` (e.g. by a build step or dev snippet).
+const LEADERBOARD_ENV = (typeof window !== 'undefined' && window.__LEADERBOARD_ENV__) || {};
+
+const LEADERBOARD = {
+    GAME_ID: 'bullet-hell',
+    KEY: 'bulletHellLeaderboard', // localStorage: last attempt + best score snapshot
+    NAME_KEY: 'bulletHellPlayerName',
+    SAVE_KEY: 'bulletHellLeaderboard',
+
+    apiBase: LEADERBOARD_ENV.apiBase || 'https://leaderboards-opal.vercel.app',
+    writeKey: LEADERBOARD_ENV.writeKey || '',
+
+    // Composite score packing (also mirrors the server's `maxValue` bounds).
+    WAVE_BASE: 1_000_000_000, // 1e9 — one wave beats any time/kills
+    TIME_BASE: 10_000,        // 1e4 — one second beats 9999 kills
+
+    // "saved best" fallback snapshot shown when the API is unreachable/unregistered
+    defaultBoard: { rows: [] },
+
+    init() {
+        // Prefill player name if we have one stored
+        const savedName = this.getSavedName();
+        const input = document.getElementById('lb-name');
+        if (input && savedName) input.value = savedName;
+
+        // Bind the submit button on the game-over board
+        const submitBtn = document.getElementById('lb-submit');
+        if (submitBtn) submitBtn.addEventListener('click', () => this.submit());
+
+        // Bind open/close for the full-screen modal
+        const pauseBtn = document.getElementById('btn-leaderboard');
+        if (pauseBtn) pauseBtn.addEventListener('click', () => this.open());
+        const menuBtn = document.getElementById('btn-leaderboard-menu');
+        if (menuBtn) menuBtn.addEventListener('click', () => this.open());
+        const closeBtn = document.getElementById('lb-close');
+        if (closeBtn) closeBtn.addEventListener('click', () => this.close());
+        const overlay = document.getElementById('leaderboard-modal');
+        if (overlay) overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.close(); // click outside closes
+        });
+    },
+
+    isConfigured() {
+        return Boolean(this.writeKey) && Boolean(this.apiBase);
+    },
+
+    // --- Composite score (Wave -> Time -> Kills) ---
+    computeScore(wave, seconds, kills) {
+        const w = Math.floor(Number(wave) || 0);
+        const t = Math.floor(Number(seconds) || 0);
+        const k = Math.floor(Number(kills) || 0);
+        // Clamp time/kills so they can never bleed into the next field.
+        const tClamped = Math.min(t, this.TIME_BASE - 1);
+        const kClamped = Math.min(k, this.TIME_BASE - 1);
+        return w * this.WAVE_BASE + tClamped * this.TIME_BASE + kClamped;
+    },
+
+    // Reverse the composite back into its parts (for friendly display).
+    decodeScore(value) {
+        const v = Math.max(0, Math.floor(Number(value) || 0));
+        const wave = Math.floor(v / this.WAVE_BASE);
+        const rest = v % this.WAVE_BASE;
+        const time = Math.floor(rest / this.TIME_BASE);
+        const kills = rest % this.TIME_BASE;
+        return { wave, time, kills };
+    },
+
+    getSavedName() {
+        try { return localStorage.getItem(this.NAME_KEY) || ''; } catch { return ''; }
+    },
+
+    setSavedName(name) {
+        try { localStorage.setItem(this.NAME_KEY, name); } catch { /* ignore */ }
+    },
+
+    // Best score from the saved run snapshot (works offline).
+    getBest() {
+        return this.getBestFromStorage();
+    },
+
+    // Open the full-screen modal (from menu or pause). Read-only board.
+    open() {
+        const modal = document.getElementById('leaderboard-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        modal.classList.add('active');
+        this.show();
+    },
+
+    // Close the modal (restores whatever screen was underneath).
+    close() {
+        const modal = document.getElementById('leaderboard-modal');
+        if (!modal) return;
+        modal.classList.remove('active');
+        modal.classList.add('hidden');
+    },
+
+    // Fetch + render the board into the modal. Called from game-over too.
+    async show() {
+        const listEl = document.getElementById('lb-list');
+        if (!listEl) return;
+        this.setStatus('');
+
+        // If no write key, prefer the saved local snapshot (offline/dev).
+        if (!this.isConfigured()) {
+            const best = this.getBest();
+            if (best && best.score > 0) {
+                this.renderRows(listEl, [{
+                    rank: 1,
+                    player: best.name || 'YOU',
+                    value: best.score,
+                    meta: best.meta
+                }]);
+            } else {
+                this.renderEmpty(listEl);
+            }
+            return;
+        }
+
+        listEl.innerHTML = '<p class="leaderboard-placeholder">Loading leaderboard…</p>';
+        try {
+            const url = `${this.apiBase}/api/leaderboard?game=${encodeURIComponent(this.GAME_ID)}&limit=10`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this.renderRows(listEl, data.rows || []);
+        } catch (e) {
+            console.warn('Leaderboard fetch failed:', e);
+            const best = this.getBest();
+            if (best && best.score > 0) {
+                this.renderRows(listEl, [{ rank: 1, player: best.name || 'YOU', value: best.score, meta: best.meta }]);
+                this.setStatus('Leaderboard unavailable — showing your best.', 'error');
+            } else {
+                this.renderEmpty(listEl);
+            }
+        }
+    },
+
+    renderRows(listEl, rows) {
+        if (!listEl) return;
+        if (!rows || rows.length === 0) {
+            this.renderEmpty(listEl);
+            return;
+        }
+        const me = (this.getSavedName() || '').trim().toLowerCase();
+        listEl.innerHTML = rows.map((r, i) => {
+            const isMe = me && r.player && r.player.toLowerCase() === me;
+            const meta = r.meta || {};
+            // Prefer explicit meta; fall back to decoding the composite.
+            const wave = meta.wave != null ? meta.wave : this.decodeScore(r.value).wave;
+            const time = meta.time != null ? meta.time : this.decodeScore(r.value).time;
+            const kills = meta.kills != null ? meta.kills : this.decodeScore(r.value).kills;
+            const metaText = [
+                wave ? `W${wave}` : '',
+                time != null ? this.formatTime(time) : '',
+                kills != null ? `${kills} kills` : ''
+            ].filter(Boolean).join(' · ');
+            return `<div class="leaderboard-row${isMe ? ' is-me' : ''}">` +
+                `<span class="lb-rank">${i + 1}</span>` +
+                `<span class="lb-name">${this.escapeHtml(r.player)}</span>` +
+                (metaText ? `<span class="lb-meta">${metaText}</span>` : '') +
+                `<span class="lb-value">W${wave}</span>` +
+                `</div>`;
+        }).join('');
+    },
+
+    renderEmpty(listEl) {
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="leaderboard-placeholder">No scores yet — be the first!</p>';
+    },
+
+    setStatus(msg, cls) {
+        const el = document.getElementById('lb-status');
+        if (!el) return;
+        if (!msg) { el.classList.add('hidden'); el.textContent = ''; return; }
+        el.classList.remove('hidden');
+        el.classList.toggle('error', cls === 'error');
+        el.textContent = msg;
+    },
+
+    // Validate like the server does (~/lib/validate.js)
+    validateName(name) {
+        const trimmed = name.trim().slice(0, 24);
+        return /^[\w\s\-.'!?]+$/u.test(trimmed) ? trimmed : null;
+    },
+
+    // Read the saved best-run snapshot from localStorage.
+    getBestFromStorage() {
+        try {
+            const raw = localStorage.getItem(this.SAVE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // Keep the highest-scoring run on this device (works even if API is offline).
+    saveRunSnapshot(run) {
+        if (!run || typeof run.score !== 'number') return;
+        const prev = this.getBestFromStorage();
+        if (prev && prev.score > run.score) return; // keep the better one
+        const best = {
+            score: Math.floor(run.score),
+            meta: {
+                time: Math.floor(run.time || 0),
+                kills: Math.floor(run.kills || 0),
+                wave: Math.floor(run.wave || 0),
+                coins: Math.floor(run.coins || 0),
+                difficulty: Math.floor(run.difficulty || 1)
+            },
+            name: run.name || ''
+        };
+        try { localStorage.setItem(this.SAVE_KEY, JSON.stringify(best)); } catch (e) { /* ignore */ }
+    },
+
+    // POST the completed run. Called when the player enters a name and submits.
+    async submit() {
+        const input = document.getElementById('lb-name');
+        const submitBtn = document.getElementById('lb-submit');
+        if (!input || !this.getBest()) { return; }
+        const name = this.validateName(input.value);
+        if (!name) {
+            this.setStatus('Name: letters, numbers, spaces, and . - \' ! ? only (max 24).', 'error');
+            return;
+        }
+
+        const best = this.getBest();
+        if (best.score <= 0) { this.setStatus('Nothing to submit yet.', 'error'); return; }
+
+        if (!this.isConfigured()) {
+            this.setStatus('Leaderboard not configured on this build.', 'error');
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting…';
+        this.setStatus('');
+        try {
+            const res = await fetch(`${this.apiBase}/api/score`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Game-Key': this.writeKey
+                },
+                body: JSON.stringify({
+                    game: this.GAME_ID,
+                    player: name,
+                    value: best.score,
+                    meta: best.meta || {}
+                })
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            this.setSavedName(name);
+            await this.show();
+            this.setStatus('Score submitted! 🎉');
+        } catch (e) {
+            console.warn('Score submit failed:', e);
+            this.setStatus(`Could not submit: ${e.message}`);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'SUBMIT SCORE';
+        }
+    },
+
+    escapeHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    formatScore(v) {
+        return Number(v).toLocaleString();
+    },
+
+    formatTime(sec) {
+        const total = Math.floor(Number(sec) || 0);
+        const m = Math.floor(total / 60).toString().padStart(2, '0');
+        const s = (total % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    }
+};
+
 // --- CLASSES ---
 
 class Player {
@@ -1371,6 +1669,9 @@ const Game = {
         document.getElementById('btn-retry').onclick = () => this.startRun();
         document.getElementById('btn-menu').onclick = () => this.quitToMenu();
 
+        // Leaderboard wiring (submit button, name prefill, modal open/close)
+        LEADERBOARD.init();
+
         // Main Loop Start
         requestAnimationFrame(t => this.loop(t));
 
@@ -1496,6 +1797,20 @@ const Game = {
         UI.elements.goCoins.textContent = coinsRun;
 
         UI.showScreen('gameOver');
+
+        // Save best-score snapshot for leaderboard (works even if API is offline)
+        const runScore = LEADERBOARD.computeScore(this.currentWave, gameTime, killCount);
+        LEADERBOARD.saveRunSnapshot({
+            score: runScore,
+            time: Math.floor(gameTime),
+            kills: killCount,
+            wave: this.currentWave,
+            coins: coinsRun,
+            difficulty: difficultyIndex + 1,
+            name: LEADERBOARD.getSavedName()
+        });
+
+        LEADERBOARD.show(); // fetch + render the board
     },
 
     buyUpgrade(id, cost) {
