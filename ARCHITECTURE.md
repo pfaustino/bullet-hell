@@ -41,4 +41,4 @@ In-file constants: `UPGRADE_POOL`, wave tables, enemy defs. No external JSON.
 
 ## Docs
 
-`bullethell-gdd.md`, `docs/adr/`.
+`bullethell-gdd.md`, `docs/adr/`, `docs/leaderboard.md` (leaderboard integration).
