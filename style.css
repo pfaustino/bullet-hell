@@ -882,3 +882,60 @@ button:active {
         padding: 1.5rem;
     }
 }
+
+/* Pause menu stays compact so Reset stays on screen in the itch embed. */
+#pause-menu {
+    z-index: 30;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 0.5rem 0 0.75rem;
+}
+
+#pause-menu h2 {
+    margin-bottom: 0.45rem;
+    font-size: 1.35rem;
+}
+
+#pause-menu .menu-buttons {
+    gap: 0.4rem;
+    width: 88%;
+    max-width: 280px;
+}
+
+#pause-menu button {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.92rem;
+    min-height: 0;
+    letter-spacing: 0.5px;
+}
+
+#pause-menu .primary-btn {
+    padding: 0.5rem 0.7rem;
+    font-size: 1rem;
+}
+
+#pause-menu .difficulty-control {
+    margin: 0.25rem 0 !important;
+}
+
+#pause-menu .difficulty-control h3 {
+    font-size: 0.75rem;
+    margin-bottom: 0.15rem;
+}
+
+#pause-menu .difficulty-control button {
+    width: 34px !important;
+    height: 34px;
+    min-height: 0;
+    padding: 0;
+    font-size: 1.1rem;
+}
+
+#pause-menu #diff-display {
+    font-size: 1rem !important;
+}
+
+#pause-menu #diff-desc {
+    margin-top: 2px !important;
+    font-size: 0.7rem !important;
+}
