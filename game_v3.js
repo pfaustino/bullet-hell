@@ -1414,14 +1414,18 @@ class Ally {
         const scaledDamage = this.damage * timeScale;
 
         if (Game && Game.projectiles) {
-            Game.projectiles.push(new Projectile(
+            const shot = new Projectile(
                 this.x,
                 this.y,
                 scaledDamage,
                 this.projectileSpeed,
                 1,
                 angle
-            ));
+            );
+            // Bigger than a normal shot (radius 4) so the extra firepower reads on screen.
+            if (this.tier === 'mega') shot.radius = 12;
+            else if (this.tier === 'giga') shot.radius = 24;
+            Game.projectiles.push(shot);
         }
     }
 
