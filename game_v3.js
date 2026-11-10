@@ -1234,26 +1234,54 @@ class Pickup {
     update(dt, player) {
         if (this.markedForDeletion) return;
 
-        // Magnet check
-        const dx = this.x - player.x;
-        const dy = this.y - player.y;
+        // Magnet check. The player has a short field; each GigaAlly has a wide one.
+        let targetX = player.x;
+        let targetY = player.y;
+        let bestSq = Infinity;
+        let inField = false;
 
-        const distSq = (dx * dx) + (dy * dy);
-
-        if (distSq < player.pickupRange * player.pickupRange) {
-            this.magnetized = true;
+        const pdx = this.x - player.x;
+        const pdy = this.y - player.y;
+        const playerSq = (pdx * pdx) + (pdy * pdy);
+        if (playerSq < player.pickupRange * player.pickupRange) {
+            bestSq = playerSq;
+            inField = true;
         }
 
+        if (player.allies) {
+            for (let i = 0; i < player.allies.length; i++) {
+                const ally = player.allies[i];
+                if (!ally.gravityRange) continue;
+                const adx = this.x - ally.x;
+                const ady = this.y - ally.y;
+                const allySq = (adx * adx) + (ady * ady);
+                if (allySq < ally.gravityRange * ally.gravityRange && allySq < bestSq) {
+                    bestSq = allySq;
+                    targetX = ally.x;
+                    targetY = ally.y;
+                    inField = true;
+                }
+            }
+        }
+
+        if (inField) this.magnetized = true;
+
         if (this.magnetized) {
-            const angle = Math.atan2(player.y - this.y, player.x - this.x);
-            const speed = 500; // Move fast to player
+            if (!inField) {
+                targetX = player.x;
+                targetY = player.y;
+            }
+            const angle = Math.atan2(targetY - this.y, targetX - this.x);
+            const speed = 500; // Move fast to the field that caught it
             this.x += Math.cos(angle) * speed * dt;
             this.y += Math.sin(angle) * speed * dt;
 
             const collectedDistSq = 900; // 30px distance
-            const distToPlayerSq = Math.pow(this.x - player.x, 2) + Math.pow(this.y - player.y, 2);
+            const cdx = this.x - targetX;
+            const cdy = this.y - targetY;
+            const distToTargetSq = (cdx * cdx) + (cdy * cdy);
 
-            if (distToPlayerSq < collectedDistSq) {
+            if (distToTargetSq < collectedDistSq) {
                 if (this.type === 'upgrade') {
                     // Apply Upgrade Immediately
                     this.data.apply(player);
@@ -1421,6 +1449,8 @@ class Ally {
         this.projectileSpeed = 600;
         this.formationOffset = 0;
         this.formationAngle = 0;
+        // GigaAllies vacuum coins, allies, and upgrades from a wide field.
+        this.gravityRange = this.tier === 'giga' ? 240 : 0;
     }
 
     update(dt, player) {
@@ -1486,6 +1516,17 @@ class Ally {
     draw(ctx) {
         const screenX = centerX + this.x;
         const screenY = this.y;
+
+        if (this.gravityRange) {
+            const pulse = 0.92 + Math.sin(gameTime * 3) * 0.08;
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, this.gravityRange * pulse, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 68, 255, 0.08)';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(255, 68, 255, 0.55)';
+            ctx.stroke();
+        }
 
         ctx.shadowBlur = this.tier === 'giga' ? 35 : this.tier === 'mega' ? 28 : 20;
         ctx.shadowColor = this.color;
