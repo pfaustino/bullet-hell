@@ -1611,27 +1611,35 @@ const AudioFX = {
     },
 
     updateMusicVolume() {
-        if (this.musicTrack) {
-            this.musicTrack.volume = this.musicVolume;
+        if (!this.musicTrack) return;
+        // volume 0 is not always silent; muted is.
+        if (this.musicVolume <= 0) {
+            this.musicTrack.volume = 0;
+            this.musicTrack.muted = true;
+            return;
         }
+        this.musicTrack.muted = false;
+        this.musicTrack.volume = Math.min(1, this.musicVolume);
     },
 
     playTone(freq, type, duration, vol = 0.1) {
+        if (this.sfxVolume <= 0) return;
         if (!this.ctx) this.init();
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = type;
         osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
 
-        // Apply global volume
         const finalVol = vol * this.sfxVolume;
-
-        gain.gain.setValueAtTime(finalVol, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        if (finalVol <= 0) return;
+        const t = this.ctx.currentTime;
+        gain.gain.setValueAtTime(finalVol, t);
+        // Fade from the chosen level. A fixed 0.01 floor kept quiet settings audible.
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, finalVol * 0.001), t + duration);
         osc.connect(gain);
         gain.connect(this.ctx.destination);
         osc.start();
-        osc.stop(this.ctx.currentTime + duration);
+        osc.stop(t + duration);
     },
     shoot() { this.playTone(400, 'square', 0.1, 0.05); },
     hit() { this.playTone(150, 'sawtooth', 0.1, 0.05); },
