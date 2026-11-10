@@ -726,13 +726,57 @@ class Player {
         this.specialWeapons = [];
         this.activeSpecialWeapons = []; // Track active special weapons with timers
 
-        // Allies (companion ships)
+        // Allies (companion ships) — every 10 of a tier fuse into the next
         this.allies = [];
 
         // Experience
         this.level = 1;
         this.xp = 0;
         this.xpToNext = 100;
+    }
+
+    /** Add a normal/strong ally, then fuse 10→Mega and 10 Mega→Giga. */
+    addAlly(isStrong = false) {
+        this.allies.push(new Ally(this.x, this.y, { isStrong }));
+        Game.addNotification(isStrong ? "STRONG ALLY JOINED!" : "ALLY JOINED!", "#00ff88");
+        this.convertAllies();
+    }
+
+    /**
+     * Fuse allies upward:
+     * 10 normal → 1 MegaAlly (10× firepower, bigger)
+     * 10 Mega → 1 GigaAlly (100× firepower, bigger still)
+     */
+    convertAllies() {
+        const NEED = 10;
+
+        while (this.allies.filter(a => a.tier === 'normal').length >= NEED) {
+            let removed = 0;
+            this.allies = this.allies.filter(a => {
+                if (a.tier === 'normal' && removed < NEED) {
+                    removed++;
+                    return false;
+                }
+                return true;
+            });
+            this.allies.push(new Ally(this.x, this.y, { tier: 'mega' }));
+            Game.addNotification("10 ALLIES →\nMEGA ALLY!", "#ffaa00", "big");
+            AudioFX.powerup();
+        }
+
+        while (this.allies.filter(a => a.tier === 'mega').length >= NEED) {
+            let removed = 0;
+            this.allies = this.allies.filter(a => {
+                if (a.tier === 'mega' && removed < NEED) {
+                    removed++;
+                    return false;
+                }
+                return true;
+            });
+            this.allies.push(new Ally(this.x, this.y, { tier: 'giga' }));
+            Game.addNotification("10 MEGA ALLIES →\nGIGA ALLY!", "#ff44ff", "big");
+            AudioFX.powerup();
+        }
     }
 
     update(dt) {
@@ -1165,19 +1209,9 @@ class Pickup {
                     Game.addNotification(this.data.name, this.data.color);
                     AudioFX.powerup(); // Sound
                 } else if (this.type === 'ally' || this.type === 'strong_ally') {
-                    // Add ally ship (limit to 30 allies to balance performance and progression)
-                    const MAX_ALLIES = 30;
-                    if (player.allies.length < MAX_ALLIES) {
-                        const newAlly = new Ally(player.x, player.y, this.isStrongAlly);
-                        player.allies.push(newAlly);
-                        Game.addNotification(this.isStrongAlly ? "STRONG ALLY JOINED!" : "ALLY JOINED!", "#00ff88");
-                        AudioFX.powerup();
-                    } else {
-                        // Already at max - give coins instead
-                        coinsRun += 10;
-                        Game.addNotification("MAX ALLIES!\n+10 COINS", "#00ff88");
-                        AudioFX.playTone(800, 'sine', 0.05, 0.05);
-                    }
+                    // Add ally; every 10 fuse into MegaAlly, every 10 Mega into GigaAlly
+                    player.addAlly(this.isStrongAlly);
+                    AudioFX.powerup();
                 } else if (this.type === 'special_weapon') {
                     // Add special weapon (temporary)
                     if (this.data && this.data.apply) {
@@ -1285,33 +1319,61 @@ class Pickup {
 }
 
 class Ally {
-    constructor(x, y, isStrong = false) {
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {{ isStrong?: boolean, tier?: 'normal'|'mega'|'giga' }} [opts]
+     *   tier mega = 10× normal firepower; giga = 100× (10 megas).
+     *   Legacy: `new Ally(x, y, true)` still means a strong normal.
+     */
+    constructor(x, y, opts = false) {
         this.x = x;
         this.y = y;
-        this.isStrong = isStrong;
-        this.radius = isStrong ? 20 : 15;
-        this.width = isStrong ? 35 : 30;
-        this.height = isStrong ? 35 : 30;
-        
-        // Combat stats
+
+        // Support old `new Ally(x, y, isStrong)` call sites
+        if (typeof opts === 'boolean') {
+            opts = { isStrong: opts };
+        }
+
+        this.tier = opts.tier || 'normal'; // 'normal' | 'mega' | 'giga'
+        this.isStrong = !!opts.isStrong && this.tier === 'normal';
+
+        const TIER_STATS = {
+            normal: { radius: 15, width: 30, height: 30, cooldown: 0.4, damage: 12, color: '#00ff88', formR: 60 },
+            mega:   { radius: 28, width: 55, height: 55, cooldown: 0.4, damage: 120, color: '#ffaa00', formR: 80 },  // 10×
+            giga:   { radius: 42, width: 80, height: 80, cooldown: 0.4, damage: 1200, color: '#ff44ff', formR: 110 }, // 100×
+        };
+        const stats = TIER_STATS[this.tier] || TIER_STATS.normal;
+
+        if (this.isStrong) {
+            this.radius = 20;
+            this.width = 35;
+            this.height = 35;
+            this.cooldown = 0.3;
+            this.damage = 20;
+            this.color = '#00ffff';
+            this.formationRadius = 60;
+        } else {
+            this.radius = stats.radius;
+            this.width = stats.width;
+            this.height = stats.height;
+            this.cooldown = stats.cooldown;
+            this.damage = stats.damage;
+            this.color = stats.color;
+            this.formationRadius = stats.formR;
+        }
+
         this.fireTimer = 0;
-        this.cooldown = isStrong ? 0.3 : 0.4;
-        this.damage = isStrong ? 20 : 12;
         this.projectileSpeed = 600;
-        
-        // Formation position relative to player
-        this.formationOffset = 0; // Will be set when added
-        this.formationAngle = 0; // For circular formation
+        this.formationOffset = 0;
+        this.formationAngle = 0;
     }
 
     update(dt, player) {
-        // Position relative to player in formation
-        const formationRadius = 60;
-        const angle = this.formationAngle + (gameTime * 0.5); // Slow rotation
-        this.x = player.x + Math.cos(angle) * formationRadius;
-        this.y = player.y + Math.sin(angle) * formationRadius;
-        
-        // Auto-attack nearest enemy
+        const angle = this.formationAngle + (gameTime * 0.5);
+        this.x = player.x + Math.cos(angle) * this.formationRadius;
+        this.y = player.y + Math.sin(angle) * this.formationRadius;
+
         this.fireTimer -= dt;
         if (this.fireTimer <= 0) {
             const nearestEnemy = this.findNearestEnemy();
@@ -1325,19 +1387,19 @@ class Ally {
     findNearestEnemy() {
         let nearest = null;
         let minDist = Infinity;
-        
+
         if (Game && Game.enemies) {
             Game.enemies.forEach(e => {
                 const dx = e.x - this.x;
                 const dy = e.y - this.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < minDist && dist < 800) { // Max range
+                if (dist < minDist && dist < 800) {
                     minDist = dist;
                     nearest = e;
                 }
             });
         }
-        
+
         return nearest;
     }
 
@@ -1346,12 +1408,11 @@ class Ally {
         const dx = target.x - this.x;
         const dy = target.y - this.y;
         const angle = Math.atan2(dy, dx);
-        
-        // Scale ally damage with gameTime to keep them relevant as enemies get stronger
-        // Base damage increases by 1% per 10 seconds of gameTime (capped at 2x)
-        const timeScale = Math.min(2.0, 1.0 + (gameTime * 0.001)); // 1% per 10 seconds
+
+        // Scale ally damage with gameTime (capped at 2x)
+        const timeScale = Math.min(2.0, 1.0 + (gameTime * 0.001));
         const scaledDamage = this.damage * timeScale;
-        
+
         if (Game && Game.projectiles) {
             Game.projectiles.push(new Projectile(
                 this.x,
@@ -1359,7 +1420,7 @@ class Ally {
                 scaledDamage,
                 this.projectileSpeed,
                 1,
-                angle // Direction
+                angle
             ));
         }
     }
@@ -1367,12 +1428,11 @@ class Ally {
     draw(ctx) {
         const screenX = centerX + this.x;
         const screenY = this.y;
-        
-        // Draw ally ship (smaller version of player ship)
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = this.isStrong ? '#00ffff' : '#00ff88';
-        ctx.fillStyle = this.isStrong ? '#00ffff' : '#00ff88';
-        
+
+        ctx.shadowBlur = this.tier === 'giga' ? 35 : this.tier === 'mega' ? 28 : 20;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = this.color;
+
         ctx.beginPath();
         ctx.moveTo(screenX, screenY - (this.height * 0.6));
         ctx.lineTo(screenX + (this.width * 0.5), screenY + (this.height * 0.5));
@@ -1380,7 +1440,18 @@ class Ally {
         ctx.lineTo(screenX - (this.width * 0.5), screenY + (this.height * 0.5));
         ctx.closePath();
         ctx.fill();
-        
+
+        // Tier badge so Mega/Giga read clearly at a glance
+        if (this.tier === 'mega' || this.tier === 'giga') {
+            ctx.font = `bold ${this.tier === 'giga' ? 16 : 12}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = this.color;
+            ctx.fillText(this.tier === 'giga' ? 'G' : 'M', screenX, screenY + 2);
+        }
+
         ctx.shadowBlur = 0;
     }
 }
@@ -1607,8 +1678,18 @@ const UI = {
             waveDisplay.textContent = `WAVE ${currentWave}`;
         }
         
+        // Ally HUD: "3+1M+1G" when Mega/Giga are present
+        const nNormal = p.allies.filter(a => a.tier === 'normal').length;
+        const nMega = p.allies.filter(a => a.tier === 'mega').length;
+        const nGiga = p.allies.filter(a => a.tier === 'giga').length;
+        const allyParts = [];
+        if (nNormal || (!nMega && !nGiga)) allyParts.push(String(nNormal));
+        if (nMega) allyParts.push(`${nMega}M`);
+        if (nGiga) allyParts.push(`${nGiga}G`);
+        const allyHud = allyParts.join('+');
+
         // Build 1-row layout: All stats + special weapons in single row
-        const statsPart = `❤️ ${lives} | 👥 ${p.allies.length} | ⚔️ ${(baseDmg * p.stats.damageMult).toFixed(1)} | 🔥 x${p.stats.fireRateMult.toFixed(2)} | ✨ ${p.weapons[0].count} | 🏹 ${p.weapons[0].pierce}`;
+        const statsPart = `❤️ ${lives} | 👥 ${allyHud} | ⚔️ ${(baseDmg * p.stats.damageMult).toFixed(1)} | 🔥 x${p.stats.fireRateMult.toFixed(2)} | ✨ ${p.weapons[0].count} | 🏹 ${p.weapons[0].pierce}`;
         let specialsPart = '';
         if (activeSpecials.length > 0) {
             // Wrap special weapons in spans with class for styling
