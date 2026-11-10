@@ -1450,7 +1450,7 @@ class Ally {
         this.formationOffset = 0;
         this.formationAngle = 0;
         // GigaAllies vacuum coins, allies, and upgrades from a wide field.
-        this.gravityRange = this.tier === 'giga' ? 240 : 0;
+        this.gravityRange = this.tier === 'giga' ? 64 : 0;
     }
 
     update(dt, player) {
