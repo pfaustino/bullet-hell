@@ -1910,8 +1910,8 @@ const UI = {
             item.className = 'shop-item';
             item.innerHTML = `
                 <div class="shop-info">
-                    <h3>${u.name} (Lvl ${currentLvl})</h3>
-                    <p>${u.desc} - Per Level</p>
+                    <h3>${u.name} (Rank ${currentLvl})</h3>
+                    <p>${u.desc} per rank</p>
                 </div>
                 <button class="buy-btn" onclick="game.buyUpgrade('${u.id}', ${cost})">
                     ${cost} 🪙
@@ -1931,12 +1931,12 @@ const UI = {
 };
 
 const DIFFICULTY_LEVELS = [
-    { name: "LEVEL 1", desc: "Easiest", hpMult: 1.0, spawnMult: 1.0 },
-    { name: "LEVEL 2", desc: "Easy", hpMult: 1.2, spawnMult: 1.5 },
-    { name: "LEVEL 3", desc: "Normal", hpMult: 1.5, spawnMult: 2.2 },
-    { name: "LEVEL 4", desc: "Hard", hpMult: 2.5, spawnMult: 4.0 },
-    { name: "LEVEL 5", desc: "Expert", hpMult: 4.0, spawnMult: 6.0 },
-    { name: "LEVEL 6", desc: "INSANE", hpMult: 8.0, spawnMult: 12.0 }
+    { name: "EASIEST", desc: "Easiest", hpMult: 1.0, spawnMult: 1.0 },
+    { name: "EASY", desc: "Easy", hpMult: 1.2, spawnMult: 1.5 },
+    { name: "NORMAL", desc: "Normal", hpMult: 1.5, spawnMult: 2.2 },
+    { name: "HARD", desc: "Hard", hpMult: 2.5, spawnMult: 4.0 },
+    { name: "EXPERT", desc: "Expert", hpMult: 4.0, spawnMult: 6.0 },
+    { name: "INSANE", desc: "Insane", hpMult: 8.0, spawnMult: 12.0 }
 ];
 
 let difficultyIndex = saveData.playerLevel; // Restored LEVEL (0 = LEVEL 1)
@@ -2109,7 +2109,7 @@ const Game = {
     refreshContinueLabel() {
         const btn = document.getElementById('btn-play');
         if (!btn) return;
-        const levelName = DIFFICULTY_LEVELS[difficultyIndex] ? DIFFICULTY_LEVELS[difficultyIndex].name : 'LEVEL 1';
+        const levelName = DIFFICULTY_LEVELS[difficultyIndex] ? DIFFICULTY_LEVELS[difficultyIndex].name : 'EASIEST';
         btn.textContent = saveData.wave >= 1 ? `CONTINUE · ${levelName} · WAVE ${saveData.wave}` : 'PLAY';
     },
 
@@ -2293,7 +2293,7 @@ const Game = {
 
     /** Wipe every saved value and return to a fresh main menu. */
     resetGame() {
-        const ok = window.confirm('Reset the game? This clears coins, upgrades, level, wave, allies, sound, and local scores.');
+        const ok = window.confirm('Reset the game? This clears coins, upgrade ranks, difficulty, wave, allies, sound, and local scores.');
         if (!ok) return;
 
         try {
