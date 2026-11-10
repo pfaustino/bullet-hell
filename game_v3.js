@@ -1276,6 +1276,8 @@ class Pickup {
                     const mult = 1 + (saveData.upgrades.coinGain * 0.2);
                     const val = Math.ceil(this.amount * mult);
                     coinsRun += val;
+                    saveData.coins += val;
+                    Game.persistProgress();
                     UI.updateHUD();
                     AudioFX.playTone(800, 'sine', 0.05, 0.05); // Coin sound
                 }
@@ -1668,7 +1670,14 @@ const Input = {
 
 // Add raw keydown handler to Input for non-continuous actions
 window.addEventListener('keydown', e => {
-    if (e.key === 'Escape') UI.togglePause();
+    if (e.key !== 'Escape') return;
+    // From the pause-menu upgrades screen, Esc returns to the pause menu.
+    if (currentState === STATE.SHOP && previousState === STATE.PAUSED) {
+        currentState = STATE.PAUSED;
+        UI.showScreen('pause');
+        return;
+    }
+    UI.togglePause();
 });
 
 const UI = {
@@ -1779,7 +1788,7 @@ const UI = {
             levelSpan.innerText = calculatedScore;
         }
 
-        this.elements.coins.textContent = coinsRun;
+        this.elements.coins.textContent = saveData.coins;
         this.elements.kills.textContent = `💀 ${killCount}`;
 
         // Hide old lives counter
@@ -1925,7 +1934,23 @@ const Game = {
             UI.showScreen('settings');
             currentState = STATE.SETTINGS;
         };
-        document.getElementById('btn-back-main').onclick = () => UI.showScreen('menu');
+        document.getElementById('btn-back-main').onclick = () => {
+            if (previousState === STATE.PAUSED) {
+                currentState = STATE.PAUSED;
+                UI.showScreen('pause');
+            } else {
+                currentState = STATE.MENU;
+                UI.showScreen('menu');
+                UI.elements.menuCoins.textContent = saveData.coins;
+            }
+        };
+        document.getElementById('btn-upgrades-pause').onclick = () => {
+            previousState = STATE.PAUSED;
+            UI.renderShop();
+            UI.showScreen('upgrades');
+            currentState = STATE.SHOP;
+        };
+        document.getElementById('btn-reset-game').onclick = () => this.resetGame();
         document.getElementById('btn-back-settings').onclick = () => {
             // Return to where we came from
             if (previousState === STATE.PAUSED) {
@@ -2180,8 +2205,8 @@ const Game = {
     gameOver() {
         currentState = STATE.GAME_OVER;
         this.runActive = false;
-        saveData.coins += coinsRun;
-        localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
+        // Coins are banked when collected, so a refresh cannot drop them.
+        this.persistProgress();
 
         UI.elements.goTime.textContent = UI.elements.timer.textContent;
         UI.elements.goKills.textContent = killCount;
@@ -2210,9 +2235,54 @@ const Game = {
         if (saveData.coins >= cost) {
             saveData.coins -= cost;
             saveData.upgrades[id] = (saveData.upgrades[id] || 0) + 1;
-            localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
+            this.persistProgress();
             UI.renderShop(); // Refresh
+            UI.updateHUD();
+            if (UI.elements.menuCoins) UI.elements.menuCoins.textContent = saveData.coins;
         }
+    },
+
+    /** Wipe every saved value and return to a fresh main menu. */
+    resetGame() {
+        const ok = window.confirm('Reset the game? This clears coins, upgrades, level, wave, allies, sound, and local scores.');
+        if (!ok) return;
+
+        try {
+            localStorage.removeItem('bulletHellSave');
+            localStorage.removeItem('bulletHellLeaderboard');
+            localStorage.removeItem('bulletHellPlayerName');
+            localStorage.removeItem('bulletHellRuns');
+        } catch (e) { /* private mode */ }
+
+        const fresh = JSON.parse(JSON.stringify(defaultSave));
+        Object.keys(saveData).forEach(key => { delete saveData[key]; });
+        Object.assign(saveData, fresh);
+
+        difficultyIndex = 0;
+        AudioFX.sfxVolume = saveData.sfxVolume;
+        AudioFX.musicVolume = saveData.musicVolume;
+        AudioFX.updateMusicVolume();
+        const sfxSlider = document.getElementById('vol-sfx');
+        const musicSlider = document.getElementById('vol-music');
+        if (sfxSlider) {
+            sfxSlider.value = String(Math.round(AudioFX.sfxVolume * 100));
+            document.getElementById('vol-sfx-val').textContent = `${sfxSlider.value}%`;
+        }
+        if (musicSlider) {
+            musicSlider.value = String(Math.round(AudioFX.musicVolume * 100));
+            document.getElementById('vol-music-val').textContent = `${musicSlider.value}%`;
+        }
+
+        coinsRun = 0;
+        this.currentWave = 0;
+        this.isWaveActive = false;
+        this.runActive = false;
+        if (this.player) this.player.reset();
+        this.updateDifficultyDisplay();
+        this.refreshContinueLabel();
+        UI.elements.menuCoins.textContent = '0';
+        UI.showScreen('menu');
+        currentState = STATE.MENU;
     },
 
     addNotification(text, color, size = 'normal') {
