@@ -163,7 +163,8 @@ let saveData = {
         coinGain: 0
     },
     playerLevel: 0, // difficulty index (LEVEL 1 = 0). Survives refresh and republish.
-    wave: 0
+    wave: 0,
+    allies: [] // { tier: 'normal'|'mega'|'giga', strong: boolean }
 };
 
 // Load saved data
@@ -177,8 +178,21 @@ const defaultSave = {
         coinGain: 0
     },
     playerLevel: 0,
-    wave: 0
+    wave: 0,
+    allies: []
 };
+
+function readSavedAllies(loaded) {
+    if (!loaded || !Array.isArray(loaded.allies)) return [];
+    const allies = [];
+    for (let i = 0; i < loaded.allies.length && allies.length < 200; i++) {
+        const row = loaded.allies[i];
+        if (!row || typeof row !== 'object') continue;
+        const tier = row.tier === 'mega' || row.tier === 'giga' ? row.tier : 'normal';
+        allies.push({ tier, strong: tier === 'normal' && !!row.strong });
+    }
+    return allies;
+}
 
 function readSavedProgress(loaded) {
     let playerLevel = Math.floor(Number(loaded && loaded.playerLevel));
@@ -187,7 +201,7 @@ function readSavedProgress(loaded) {
     let wave = Math.floor(Number(loaded && loaded.wave));
     if (!Number.isFinite(wave) || wave < 1) wave = 0;
     wave = Math.min(wave, 100000);
-    return { playerLevel, wave };
+    return { playerLevel, wave, allies: readSavedAllies(loaded) };
 }
 
 if (localStorage.getItem('bulletHellSave')) {
@@ -200,7 +214,8 @@ if (localStorage.getItem('bulletHellSave')) {
             coins: typeof loaded.coins === 'number' ? loaded.coins : 0,
             upgrades: { ...defaultSave.upgrades, ...loaded.upgrades },
             playerLevel: progress.playerLevel,
-            wave: progress.wave
+            wave: progress.wave,
+            allies: progress.allies
         };
     } catch (e) {
         console.error('Save file corrupted, resetting.');
@@ -795,6 +810,7 @@ class Player {
             Game.addNotification("10 MEGA ALLIES →\nGIGA ALLY!", "#ff44ff", "big");
             AudioFX.powerup();
         }
+        if (Game && Game.persistProgress) Game.persistProgress();
     }
 
     update(dt) {
@@ -1968,14 +1984,30 @@ const Game = {
         this.updateDifficultyDisplay();
     },
 
-    /** Write level + wave into the stable local save. Never keys this off the build version. */
+    /** Write level, wave, and the ally fleet into the stable local save. */
     persistProgress() {
         saveData.playerLevel = difficultyIndex;
         if (this.currentWave > 0) saveData.wave = this.currentWave;
+        // Only snapshot the live fleet during a run. A menu refresh must not
+        // replace a saved fleet with the empty list from player.reset().
+        if (this.runActive && this.player && Array.isArray(this.player.allies)) {
+            saveData.allies = this.player.allies.slice(0, 200).map(a => ({
+                tier: a.tier === 'mega' || a.tier === 'giga' ? a.tier : 'normal',
+                strong: !!a.isStrong
+            }));
+        }
         try {
             localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
         } catch (e) { /* private mode / full storage */ }
         this.refreshContinueLabel();
+    },
+
+    restoreAllies() {
+        const saved = Array.isArray(saveData.allies) ? saveData.allies : [];
+        this.player.allies = saved.map(row => new Ally(this.player.x, this.player.y, {
+            tier: row.tier,
+            isStrong: !!row.strong
+        }));
     },
 
     refreshContinueLabel() {
@@ -2026,6 +2058,7 @@ const Game = {
     startRun() {
         this.player.reset();
         this.player.y = canvas.height - Math.max(120, canvas.height * 0.15);
+        this.restoreAllies();
 
         this.enemies = [];
         this.projectiles = [];
