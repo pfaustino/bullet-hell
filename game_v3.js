@@ -164,7 +164,9 @@ let saveData = {
     },
     playerLevel: 0, // difficulty index (LEVEL 1 = 0). Survives refresh and republish.
     wave: 0,
-    allies: [] // { tier: 'normal'|'mega'|'giga', strong: boolean }
+    allies: [], // { tier: 'normal'|'mega'|'giga', strong: boolean }
+    sfxVolume: 0.5,
+    musicVolume: 0.3
 };
 
 // Load saved data
@@ -179,8 +181,16 @@ const defaultSave = {
     },
     playerLevel: 0,
     wave: 0,
-    allies: []
+    allies: [],
+    sfxVolume: 0.5,
+    musicVolume: 0.3
 };
+
+function readSavedVolume(value, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(1, Math.max(0, n));
+}
 
 function readSavedAllies(loaded) {
     if (!loaded || !Array.isArray(loaded.allies)) return [];
@@ -201,7 +211,13 @@ function readSavedProgress(loaded) {
     let wave = Math.floor(Number(loaded && loaded.wave));
     if (!Number.isFinite(wave) || wave < 1) wave = 0;
     wave = Math.min(wave, 100000);
-    return { playerLevel, wave, allies: readSavedAllies(loaded) };
+    return {
+        playerLevel,
+        wave,
+        allies: readSavedAllies(loaded),
+        sfxVolume: readSavedVolume(loaded && loaded.sfxVolume, 0.5),
+        musicVolume: readSavedVolume(loaded && loaded.musicVolume, 0.3)
+    };
 }
 
 if (localStorage.getItem('bulletHellSave')) {
@@ -215,7 +231,9 @@ if (localStorage.getItem('bulletHellSave')) {
             upgrades: { ...defaultSave.upgrades, ...loaded.upgrades },
             playerLevel: progress.playerLevel,
             wave: progress.wave,
-            allies: progress.allies
+            allies: progress.allies,
+            sfxVolume: progress.sfxVolume,
+            musicVolume: progress.musicVolume
         };
     } catch (e) {
         console.error('Save file corrupted, resetting.');
@@ -1528,8 +1546,8 @@ class Particle {
 
 const AudioFX = {
     ctx: null,
-    sfxVolume: 0.5, // Default 50%
-    musicVolume: 0.3, // Default 30%
+    sfxVolume: saveData.sfxVolume, // Restored; default 50%
+    musicVolume: saveData.musicVolume, // Restored; default 30%
     musicTrack: null,
 
     init() {
@@ -1925,7 +1943,9 @@ const Game = {
         sfxSlider.oninput = (e) => {
             const v = e.target.value;
             AudioFX.sfxVolume = v / 100;
+            saveData.sfxVolume = AudioFX.sfxVolume;
             sfxVal.textContent = `${v}%`;
+            this.persistProgress();
             // Test sound (debounced ideally, but okay for direct feedback)
             // AudioFX.playTone(400, 'sine', 0.1, 0.1); 
         };
@@ -1938,8 +1958,10 @@ const Game = {
         musicSlider.oninput = (e) => {
             const v = e.target.value;
             AudioFX.musicVolume = v / 100;
+            saveData.musicVolume = AudioFX.musicVolume;
             AudioFX.updateMusicVolume();
             musicVal.textContent = `${v}%`;
+            this.persistProgress();
         };
         // Init Music Slider logic (Sync with default)
         musicSlider.value = AudioFX.musicVolume * 100;
