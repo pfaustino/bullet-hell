@@ -161,7 +161,9 @@ let saveData = {
         damage: 0,
         xpGain: 0,
         coinGain: 0
-    }
+    },
+    playerLevel: 0, // difficulty index (LEVEL 1 = 0). Survives refresh and republish.
+    wave: 0
 };
 
 // Load saved data
@@ -173,16 +175,32 @@ const defaultSave = {
         damage: 0,
         xpGain: 0,
         coinGain: 0
-    }
+    },
+    playerLevel: 0,
+    wave: 0
 };
+
+function readSavedProgress(loaded) {
+    let playerLevel = Math.floor(Number(loaded && loaded.playerLevel));
+    if (!Number.isFinite(playerLevel)) playerLevel = 0;
+    playerLevel = Math.min(5, Math.max(0, playerLevel));
+    let wave = Math.floor(Number(loaded && loaded.wave));
+    if (!Number.isFinite(wave) || wave < 1) wave = 0;
+    wave = Math.min(wave, 100000);
+    return { playerLevel, wave };
+}
 
 if (localStorage.getItem('bulletHellSave')) {
     try {
         const loaded = JSON.parse(localStorage.getItem('bulletHellSave'));
-        // Merge with defaults to prevent missing keys/NaN
+        const progress = readSavedProgress(loaded);
+        // Merge with defaults to prevent missing keys/NaN.
+        // playerLevel and wave stay on this same key so a republish does not wipe them.
         saveData = {
             coins: typeof loaded.coins === 'number' ? loaded.coins : 0,
-            upgrades: { ...defaultSave.upgrades, ...loaded.upgrades }
+            upgrades: { ...defaultSave.upgrades, ...loaded.upgrades },
+            playerLevel: progress.playerLevel,
+            wave: progress.wave
         };
     } catch (e) {
         console.error('Save file corrupted, resetting.');
@@ -1829,7 +1847,8 @@ const DIFFICULTY_LEVELS = [
     { name: "LEVEL 6", desc: "INSANE", hpMult: 8.0, spawnMult: 12.0 }
 ];
 
-let difficultyIndex = 0; // Default 0 (Level 1)
+let difficultyIndex = saveData.playerLevel; // Restored LEVEL (0 = LEVEL 1)
+if (difficultyIndex < 0 || difficultyIndex >= DIFFICULTY_LEVELS.length) difficultyIndex = 0;
 
 const Game = {
     player: null,
@@ -1922,7 +1941,10 @@ const Game = {
         // Difficulty Buttons
         document.getElementById('btn-diff-up').onclick = () => this.changeDifficulty(1);
         document.getElementById('btn-diff-down').onclick = () => this.changeDifficulty(-1);
-        this.updateDifficultyDisplay(); // Init text
+        this.updateDifficultyDisplay(); // Init text from the saved level
+        this.refreshContinueLabel();
+        // Refresh and tab-close both keep the same local save. A new publish does not clear it.
+        window.addEventListener('pagehide', () => this.persistProgress());
 
         document.getElementById('btn-retry').onclick = () => this.startRun();
         document.getElementById('btn-menu').onclick = () => this.quitToMenu();
@@ -1941,7 +1963,26 @@ const Game = {
         difficultyIndex += dir;
         if (difficultyIndex < 0) difficultyIndex = 0;
         if (difficultyIndex >= DIFFICULTY_LEVELS.length) difficultyIndex = DIFFICULTY_LEVELS.length - 1;
+        saveData.playerLevel = difficultyIndex;
+        this.persistProgress();
         this.updateDifficultyDisplay();
+    },
+
+    /** Write level + wave into the stable local save. Never keys this off the build version. */
+    persistProgress() {
+        saveData.playerLevel = difficultyIndex;
+        if (this.currentWave > 0) saveData.wave = this.currentWave;
+        try {
+            localStorage.setItem('bulletHellSave', JSON.stringify(saveData));
+        } catch (e) { /* private mode / full storage */ }
+        this.refreshContinueLabel();
+    },
+
+    refreshContinueLabel() {
+        const btn = document.getElementById('btn-play');
+        if (!btn) return;
+        const levelName = DIFFICULTY_LEVELS[difficultyIndex] ? DIFFICULTY_LEVELS[difficultyIndex].name : 'LEVEL 1';
+        btn.textContent = saveData.wave >= 1 ? `CONTINUE · ${levelName} · WAVE ${saveData.wave}` : 'PLAY';
     },
 
 
@@ -1993,7 +2034,8 @@ const Game = {
         this.enemySpawnTimer = 0;
         this.allySpawnTimer = 0;
         this.specialWeaponTimer = 10; // Start at 10s so first spawn happens immediately
-        this.waveBreakTimer = 3; // 3 second break before first wave
+        const resumeWave = saveData.wave >= 1 ? saveData.wave : 0;
+        this.waveBreakTimer = resumeWave >= 1 ? 0 : 3; // first visit waits, a saved wave starts now
         this.currentWave = 0;
         this.isWaveActive = false;
 
@@ -2006,9 +2048,9 @@ const Game = {
         this.runActive = true; // a run is in progress (can be quit -> save/submit)
 
         UI.showScreen('hud');
-        UI.updateHUD();
-
         currentState = STATE.PLAYING;
+        if (resumeWave >= 1) this.startWave(resumeWave);
+        UI.updateHUD();
     },
 
     quitToMenu() {
@@ -2133,6 +2175,7 @@ const Game = {
     startWave(waveNum) {
         this.isWaveActive = true;
         this.currentWave = waveNum;
+        this.persistProgress();
         
         // Visual Notification - Two lines for mobile portrait
         const color = waveNum % 5 === 0 ? '#ff0000' : '#bd00ff';

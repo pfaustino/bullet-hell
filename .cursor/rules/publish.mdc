@@ -1,0 +1,23 @@
+---
+description: Publish every completed game change to GitHub Pages and itch.io
+alwaysApply: true
+---
+
+# Publish game changes
+
+After a requested change to the game is done, publish it. Do not wait for a separate "publish" message.
+
+## GitHub Pages
+
+Pages serves `main` at https://pfaustino.github.io/bullet-hell/
+
+- Bump `package.json` version.
+- Commit the change (never `.env`, keys, `auth`, or `auth-wal`).
+- Push `main` and tag `vX.Y.Z`.
+
+## itch.io
+
+- `npm run build -- --base=./`
+- Copy `game_v3.js`, `dev/DevPanel.js`, and `audio/` into `dist/` (Vite does not bundle those plain scripts).
+- `butler push dist pfaustino/bullet-hell:html5 --userversion <package.json version>`
+- Confirm the html5 channel version, then confirm the Pages build is `built` and the live `game_v3.js` contains the change.
